@@ -1,0 +1,50 @@
+name: Device report
+description: How SolidFerry works with your phone or tablet — reports of devices that just work are welcome too
+labels: [device]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks! Every device behaves a little differently, and these reports are how the
+        tested-devices list in docs/DEVICE_TESTS.md grows.
+  - type: input
+    id: device
+    attributes:
+      label: Device
+      description: Maker and model (Settings › About phone).
+      placeholder: Samsung Galaxy S23
+    validations:
+      required: true
+  - type: input
+    id: android
+    attributes:
+      label: Android version
+      placeholder: "14"
+    validations:
+      required: true
+  - type: checkboxes
+    id: connection
+    attributes:
+      label: Connections you tried
+      options:
+        - label: USB with USB debugging (ADB)
+        - label: USB in File transfer mode (MTP)
+        - label: Wi-Fi (wireless debugging)
+  - type: textarea
+    id: result
+    attributes:
+      label: What worked, what didn't
+      placeholder: Browsing a 5,000-photo folder took …; downloads …; uploads keep/don't keep dates …
+    validations:
+      required: true
+  - type: textarea
+    id: devtest
+    attributes:
+      label: Device test output (optional)
+      description: "`sferry -s SERIAL devtest adb|mtp quick` — it only uses its own /sdcard/Download/xfer-devtest-* folder. See docs/DEVICE_TESTS.md."
+      render: text
+  - type: input
+    id: versions
+    attributes:
+      label: SolidFerry and macOS versions
+      placeholder: SolidFerry 0.1.0, macOS 15.5 (Apple Silicon)

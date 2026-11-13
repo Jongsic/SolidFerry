@@ -1,0 +1,46 @@
+name: Release
+
+# Push a tag `vX.Y.Z` to publish a release. Builds are ad-hoc signed and not notarized:
+# macOS asks the user to approve the app once (see the release notes below).
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install tools
+        run: brew install xcodegen
+
+      - name: Unit tests
+        working-directory: Packages/SolidFerryKit
+        run: swift test
+
+      # The same script contributors run locally.
+      - name: Build & package DMG
+        run: scripts/build-dmg.sh "${GITHUB_REF_NAME}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: build/SolidFerry-*.dmg
+          generate_release_notes: true
+          body: |
+            Requires macOS 14 or later. Licensed under the [MIT License](https://github.com/${{ github.repository }}/blob/main/LICENSE), provided *as is*, without warranty of any kind.
+
+            > ⚠️ **First launch**: this build is not notarized, so macOS warns about it **once**.
+
+            **macOS 15 (Sequoia) and later**
+            1. Open SolidFerry. macOS says it *can't verify* the app. Click **Done** (not Move to Trash).
+            2. Open **System Settings ▸ Privacy & Security**, scroll to **Security**.
+            3. Next to *"SolidFerry" was blocked to protect your Mac*, click **Open Anyway**, then **Open**.
+
+            **macOS 14**
+            1. In Finder, right-click SolidFerry.app ▸ **Open**, then click **Open**.

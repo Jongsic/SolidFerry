@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  macos:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install tools
+        run: |
+          brew install xcodegen
+          # SwiftFormat pinned to .swiftformat's --minversion, so CI and local lint agree.
+          version=$(sed -n 's/^--minversion //p' .swiftformat)
+          curl -fsSL -o "$RUNNER_TEMP/swiftformat.zip" \
+            "https://github.com/nicklockwood/SwiftFormat/releases/download/$version/swiftformat.zip"
+          unzip -q "$RUNNER_TEMP/swiftformat.zip" -d "$RUNNER_TEMP/swiftformat"
+          bin=$(find "$RUNNER_TEMP/swiftformat" -type f -name swiftformat | head -n 1)
+          chmod +x "$bin"
+          test "$("$bin" --version)" = "$version"
+          echo "$(dirname "$bin")" >> "$GITHUB_PATH"
+
+      - name: Lint (SwiftFormat)
+        run: swiftformat --lint .
+
+      - name: Unit tests (SolidFerryKit)
+        working-directory: Packages/SolidFerryKit
+        run: swift test
+
+      - name: Build the CLI (sferry)
+        working-directory: Packages/SolidFerryKit
+        run: swift build -c release --product sferry
+
+      - name: Build the app (unsigned)
+        run: |
+          set -o pipefail
+          xcodegen generate
+          xcodebuild -project SolidFerry.xcodeproj -scheme SolidFerry -configuration Release \
+            -destination 'generic/platform=macOS' CODE_SIGN_IDENTITY=- build

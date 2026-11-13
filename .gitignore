@@ -1,0 +1,11 @@
+.DS_Store
+/build/
+DerivedData/
+.build/
+.swiftpm/
+*.xcodeproj/
+xcuserdata/
+
+# Local notes (planning), not part of the repo
+/.local/
+CLAUDE.local.md

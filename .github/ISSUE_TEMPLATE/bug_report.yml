@@ -1,0 +1,49 @@
+name: Bug report
+description: Something is broken or behaves unexpectedly
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+      placeholder: |
+        1. Open the device's DCIM/Camera folder
+        2. Download 300 photos to …
+        3. Expected … but …
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device and Android version
+      placeholder: Samsung Galaxy S23, Android 14
+    validations:
+      required: true
+  - type: dropdown
+    id: connection
+    attributes:
+      label: Connection
+      options:
+        - USB with USB debugging (ADB)
+        - USB in File transfer mode (MTP)
+        - Wi-Fi (wireless debugging)
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: SolidFerry and macOS versions
+      description: SolidFerry's version is in SolidFerry › About SolidFerry.
+      placeholder: SolidFerry 0.1.0, macOS 15.5 (Apple Silicon)
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: |
+        Screenshots, the message the app showed, or logs:
+        `log show --last 10m --predicate 'subsystem == "com.jongsic.SolidFerry"'`
+        Please check logs and screenshots for personal file names before posting.

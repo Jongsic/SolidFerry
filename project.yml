@@ -1,0 +1,55 @@
+name: SolidFerry
+options:
+  bundleIdPrefix: com.jongsic
+  developmentLanguage: en
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+packages:
+  SolidFerryKit:
+    path: Packages/SolidFerryKit
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+targets:
+  SolidFerry:
+    type: application
+    platform: macOS
+    sources: [App]
+    dependencies:
+      - package: SolidFerryKit
+        product: DeviceCore
+      - package: SolidFerryKit
+        product: AdbKit
+      - package: SolidFerryKit
+        product: UsbKit
+      - package: SolidFerryKit
+        product: TransferKit
+      - package: SolidFerryKit
+        product: MtpKit
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: SolidFerry
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleDevelopmentRegion: en
+        LSApplicationCategoryType: public.app-category.utilities
+        NSHumanReadableCopyright: "Copyright © 2026 Jongsic and SolidFerry contributors. MIT License."
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jongsic.SolidFerry
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual
+        ENABLE_HARDENED_RUNTIME: NO
+        # No sandbox: the app talks to the adb server socket and USB devices directly.
+        ENABLE_APP_SANDBOX: NO
+        GENERATE_INFOPLIST_FILE: NO
+        LOCALIZATION_PREFERS_STRING_CATALOGS: YES
+        SWIFT_EMIT_LOC_STRINGS: YES

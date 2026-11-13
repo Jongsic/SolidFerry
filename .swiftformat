@@ -1,0 +1,8 @@
+# Only whitespace-level rules: they never change what the code means or how it is laid out
+# by intent (alignment, wrapping). CI runs `swiftformat --lint .` with this exact version.
+--minversion 0.64.5
+--swiftversion 6.0
+
+--rules trailingSpace,consecutiveBlankLines,blankLinesAtStartOfScope,blankLinesAtEndOfScope,linebreakAtEndOfFile,spaceInsideParens,spaceInsideBrackets,spaceAroundParens,spaceAroundComments,leadingDelimiters,emptyBraces,blankLinesBetweenImports
+
+--exclude build,.build,Packages/SolidFerryKit/.build,DerivedData,*.xcodeproj
