@@ -47,4 +47,4 @@ body:
     id: versions
     attributes:
       label: SolidFerry and macOS versions
-      placeholder: SolidFerry 0.1.0, macOS 15.5 (Apple Silicon)
+      placeholder: SolidFerry 1.0.0, macOS 15.5 (Apple Silicon)
