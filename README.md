@@ -128,8 +128,8 @@ Available in English and Korean.
 ## Performance
 
 Over USB; each number is the middle of three runs. The Lenovo Tab P11, a $100 tablet from 2021, is
-the slowest device we test with; the Galaxy Z Flip5 and S23 (2023) are not the newest, about
-mid-range today.
+the slowest device we test with; the Galaxy S10+ is a flagship from 2019; the Galaxy Z Flip5 and S23
+(2023) are not the newest, about mid-range today.
 
 | Device | Connection | 10,000-photo folder: first files | Ready to browse | 1.8 GB video: playing |
 |---|---|---|---|---|
@@ -137,6 +137,8 @@ mid-range today.
 | Galaxy S23 (2023) | MTP | 0.2 s | 0.2 s | 0.3 s |
 | Galaxy Z Flip5 (2023) | ADB | 0.04 s | 1.9 s | 0.2 s |
 | Galaxy Z Flip5 (2023) | MTP | 0.4 s | 0.4 s | 0.2 s |
+| Galaxy S10+ (2019) | ADB | 0.1 s | 1.8 s | 0.3 s |
+| Galaxy S10+ (2019) | MTP | 1.8 s | 1.8 s | 0.3 s |
 | Lenovo Tab P11 ($100 tablet, 2021) | ADB | 0.2 s | 4.1 s | 1.2 s |
 | Lenovo Tab P11 ($100 tablet, 2021) | MTP | 1.9 s | 1.9 s | 0.7 s |
 
