@@ -33,26 +33,38 @@ public struct TransferPolicy: Codable, Hashable, Sendable {
     /// to the copy time).
     public var sizeOnlyMatch: Bool
     public var existingFolder: ExistingFolderPolicy
+    /// A file already there with the same size (and, compared by contents, the same contents)
+    /// but another date only gets the incoming file's date; nothing is copied. Downloads to this
+    /// Mac only (`normalized`), with the skip and "…differs" policies.
+    public var datesOnlyWhenSameSize: Bool
 
     /// Defaults never touch what's already at the destination.
     public init(existing: ExistingFilePolicy = .skip,
                 whenDifferent: DifferentFileAction = .keepBoth,
                 sizeOnlyMatch: Bool = false,
-                existingFolder: ExistingFolderPolicy = .merge) {
+                existingFolder: ExistingFolderPolicy = .merge,
+                datesOnlyWhenSameSize: Bool = false) {
         self.existing = existing
         self.whenDifferent = whenDifferent
         self.sizeOnlyMatch = sizeOnlyMatch
         self.existingFolder = existingFolder
+        self.datesOnlyWhenSameSize = datesOnlyWhenSameSize
     }
 
     /// Without content hashes (MTP, device to device) "compare contents" falls back to
     /// comparing size and date; otherwise every same-size file would count as different and be
-    /// replaced. The remembered last policy can carry it into such a transfer.
-    public func normalized(hashAvailable: Bool) -> TransferPolicy {
-        guard existing == .ifHashDiffers, !hashAvailable else { return self }
+    /// replaced. The remembered last policy can carry it into such a transfer. Dates are set
+    /// only on this Mac (`toMac`): phones differ too much in whether they keep them.
+    public func normalized(hashAvailable: Bool, toMac: Bool = false) -> TransferPolicy {
         var policy = self
-        policy.existing = .ifSizeOrDateDiffers
+        if existing == .ifHashDiffers, !hashAvailable { policy.existing = .ifSizeOrDateDiffers }
+        if !toMac { policy.datesOnlyWhenSameSize = false }
         return policy
+    }
+
+    /// Whether "dates only" applies under this file policy.
+    public var setsDates: Bool {
+        datesOnlyWhenSameSize && [.skip, .ifSizeOrDateDiffers, .ifHashDiffers].contains(existing)
     }
 
     /// Tolerates settings saved by older versions (missing keys take defaults).
@@ -63,6 +75,7 @@ public struct TransferPolicy: Codable, Hashable, Sendable {
         whenDifferent = try c.decodeIfPresent(DifferentFileAction.self, forKey: .whenDifferent) ?? defaults.whenDifferent
         sizeOnlyMatch = try c.decodeIfPresent(Bool.self, forKey: .sizeOnlyMatch) ?? defaults.sizeOnlyMatch
         existingFolder = try c.decodeIfPresent(ExistingFolderPolicy.self, forKey: .existingFolder) ?? defaults.existingFolder
+        datesOnlyWhenSameSize = try c.decodeIfPresent(Bool.self, forKey: .datesOnlyWhenSameSize) ?? defaults.datesOnlyWhenSameSize
     }
 }
 
@@ -116,6 +129,9 @@ public enum FileDecision: String, Sendable, Hashable, Codable {
     case ask
     /// A folder occupies the file's name.
     case typeConflict
+    /// The file there is the same but for its date: only the date is set
+    /// (`TransferPolicy.datesOnlyWhenSameSize`).
+    case setDate
 
     public var transfers: Bool {
         self == .transfer || self == .overwrite || self == .keepBoth
@@ -138,8 +154,9 @@ public enum FileDecision: String, Sendable, Hashable, Codable {
             return .transfer
         case .directory:
             return .typeConflict
-        case .file(let sizeMatches, _):
+        case .file(let sizeMatches, let dateMatches):
             let different: FileDecision = policy.whenDifferent == .overwrite ? .overwrite : .keepBoth
+            if policy.setsDates, policy.existing != .ifHashDiffers, sizeMatches, !dateMatches { return .setDate }
             switch policy.existing {
             case .skip: return .skipExisting
             case .ifSizeOrDateDiffers:
@@ -153,9 +170,10 @@ public enum FileDecision: String, Sendable, Hashable, Codable {
         }
     }
 
-    /// Resolves `needsHash` once both hashes are known.
-    public static func afterHash(equal: Bool, _ policy: TransferPolicy) -> FileDecision {
-        equal ? .skipIdentical : (policy.whenDifferent == .overwrite ? .overwrite : .keepBoth)
+    /// Resolves `needsHash` once both hashes are known (`dateMatches`: the two files' dates).
+    public static func afterHash(equal: Bool, dateMatches: Bool = true, _ policy: TransferPolicy) -> FileDecision {
+        if equal { return policy.setsDates && !dateMatches ? .setDate : .skipIdentical }
+        return policy.whenDifferent == .overwrite ? .overwrite : .keepBoth
     }
 }
 

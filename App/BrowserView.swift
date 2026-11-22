@@ -16,10 +16,7 @@ struct BrowserView: View {
     @AppStorage(SettingsKey.toolbarStyle) private var toolbarStyle = ToolbarStyle.titleBar
     @AppStorage(SettingsKey.showPreviewPanel) private var showPreview = false
     @Environment(\.openWindow) private var openWindow
-    @State private var downloadRequest: DownloadRequest?
     @State private var pendingDelete: [RemoteEntry]?
-    @State private var uploadRequest: UploadRequest?
-    @State private var deviceCopyRequest: DeviceCopyRequest?
     @State private var batchRenameRequest: BatchRenameRequest?
 
     private func requestBatchRename(_ entries: [RemoteEntry]) {
@@ -32,8 +29,8 @@ struct BrowserView: View {
 
     private func requestUpload(_ urls: [URL], into folder: RemoteRef?) {
         guard let fs = browser.fileSystem, let deviceID, let target = folder ?? browser.location, !urls.isEmpty else { return }
-        uploadRequest = UploadRequest(deviceID: deviceID, deviceName: deviceName, sources: urls,
-                                      destination: target, fileSystem: fs)
+        showDialog(.upload(UploadRequest(deviceID: deviceID, deviceName: deviceName, sources: urls,
+                                         destination: target, fileSystem: fs)))
     }
 
     private func requestDeviceCopy(_ items: [DraggedEntry], into folder: RemoteRef?, move: Bool) -> Bool {
@@ -43,9 +40,9 @@ struct BrowserView: View {
             browser.operationError = String(localized: "\(first.deviceName) isn’t connected. Connect it to copy these items.")
             return false
         }
-        deviceCopyRequest = DeviceCopyRequest(items: items, sourceFileSystem: sourceFS, destinationDeviceID: deviceID,
-                                              destinationDeviceName: deviceName, destination: target,
-                                              destinationFileSystem: fs, move: move)
+        showDialog(.deviceCopy(DeviceCopyRequest(items: items, sourceFileSystem: sourceFS, destinationDeviceID: deviceID,
+                                                 destinationDeviceName: deviceName, destination: target,
+                                                 destinationFileSystem: fs, move: move)))
         return true
     }
 
@@ -64,12 +61,16 @@ struct BrowserView: View {
 
     private func requestDownload(_ entries: [RemoteEntry], droppedAt folder: URL? = nil,
                                  completions: [(Error?) -> Void] = []) {
-        guard let fs = browser.fileSystem, let deviceID, !entries.isEmpty, downloadRequest == nil else {
+        guard let fs = browser.fileSystem, let deviceID, !entries.isEmpty else {
             completions.forEach { $0(CocoaError(.userCancelled)) }
             return
         }
-        downloadRequest = DownloadRequest(deviceID: deviceID, deviceName: deviceName, entries: entries,
-                                          fileSystem: fs, droppedAt: folder, completions: completions)
+        showDialog(.download(DownloadRequest(deviceID: deviceID, deviceName: deviceName, entries: entries,
+                                             fileSystem: fs, droppedAt: folder, completions: completions)))
+    }
+
+    private func showDialog(_ request: TransferDialogRequest) {
+        openWindow(id: WindowID.transferDialog, value: TransferDialogs.register(request))
     }
 
     /// The file list with its state overlays (connecting, waiting, errors, empty).
@@ -178,8 +179,7 @@ struct BrowserView: View {
         // Development: -dev.showDialog download|upload:/local/path opens that dialog once
         // the folder is listed, for checking it in snapshots.
         .onChange(of: browser.visibleEntries.isEmpty || browser.isLoading, initial: true) { _, notReady in
-            guard !notReady, !DevelopmentDialog.shown, let spec = UserDefaults.standard.string(forKey: "dev.showDialog"),
-                  downloadRequest == nil, uploadRequest == nil else { return }
+            guard !notReady, !DevelopmentDialog.shown, let spec = UserDefaults.standard.string(forKey: "dev.showDialog") else { return }
             // A launch argument can't be removed from the defaults; remember it's done instead.
             DevelopmentDialog.shown = true
             if spec == "download" {
@@ -224,9 +224,6 @@ struct BrowserView: View {
             }
         }
         #endif
-        .sheet(item: $downloadRequest) { DownloadSheet(request: $0) }
-        .sheet(item: $uploadRequest) { UploadSheet(request: $0) }
-        .sheet(item: $deviceCopyRequest) { DeviceCopySheet(request: $0) }
         .sheet(item: $batchRenameRequest) { BatchRenameSheet(request: $0, browser: browser) }
         .alert(deleteTitle, isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
                presenting: pendingDelete) { targets in

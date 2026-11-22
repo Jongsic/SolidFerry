@@ -13,6 +13,8 @@ public struct TransferSummary: Sendable {
     public var hashCount = 0
     public var askCount = 0
     public var skipCount = 0
+    /// Files that only get the incoming file's date.
+    public var dateCount = 0
 
     /// Files whose name is already taken at the destination.
     public var existingCount: Int { same + different }
@@ -35,6 +37,7 @@ public struct TransferSummary: Sendable {
             case .needsHash: hashCount += 1
             case .ask: askCount += 1
             case .skipIdentical, .skipExisting, .typeConflict: skipCount += 1
+            case .setDate: dateCount += 1
             }
         }
     }

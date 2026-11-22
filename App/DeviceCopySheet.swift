@@ -36,6 +36,8 @@ struct DeviceCopySheet: View {
     @State private var choices: [String: ConflictChoice] = [:]
     @State private var lookedUp: [String: RemoteEntry] = [:]
     @State private var previewing = false
+    /// Bumped by the list's refresh button: the selection and the destination are read again.
+    @State private var refreshes = 0
     @State private var uploadDates = UploadDatesState.checking
 
     init(request: DeviceCopyRequest) {
@@ -88,18 +90,20 @@ struct DeviceCopySheet: View {
             // Hashes are compared against a local copy; between device folders there is none.
             FileComparisonPanel(policy: $policy, choices: $choices, previewing: $previewing, rows: rows, summary: summary,
                                 progress: compared,
-                                hashAvailable: false, uploadDates: uploadDates, comparedAs: comparedPolicy)
+                                hashAvailable: false, uploadDates: uploadDates, comparedAs: comparedPolicy,
+                                moving: move, refresh: refresh)
                 .onAppear { policy = policy.normalized(hashAvailable: false) }
 
             Divider()
 
-            TransferDialogFooter(outcome: summary?.footer, canStart: true, cancel: { dismiss() }, start: start)
+            TransferDialogFooter(outcome: summary?.footer(moving: move), canStart: true, cancel: { dismiss() }, start: start)
         }
         .padding(20)
-        .scaledFrame(width: 780)
+        .scaledFrame(minWidth: 780)
+        .navigationTitle(move ? Text("Move to \(request.destination.name)") : Text("Copy to \(request.destination.name)"))
         .textArea(.panels)
         .scaledButtons()
-        .task(id: previewing) {
+        .task(id: ScanKey(previewing: previewing, refreshes: refreshes)) {
             guard previewing, plan == nil else { return }
             do {
                 plan = try await TransferPlanner.expand(request.items.map(\.entry), in: request.sourceFileSystem)
@@ -115,12 +119,25 @@ struct DeviceCopySheet: View {
             case nil: .notApplicable // couldn't tell; compare as usual
             }
         }
-        .task(id: StatKey(files: plan?.files.count, folders: policy.existingFolder)) { await compare() }
+        .task(id: StatKey(files: plan?.files.count, folders: policy.existingFolder, refreshes: refreshes)) { await compare() }
+    }
+
+    private struct ScanKey: Equatable {
+        let previewing: Bool
+        let refreshes: Int
     }
 
     private struct StatKey: Equatable {
         let files: Int?
         let folders: ExistingFolderPolicy
+        let refreshes: Int
+    }
+
+    private func refresh() {
+        plan = nil
+        rows = nil
+        scanError = nil
+        refreshes += 1
     }
 
     private var selectionTitle: String {
@@ -168,7 +185,7 @@ struct DeviceCopySheet: View {
     private var keptChoices: [String: ConflictChoice] { FileRow.choices(choices, stillInTheWayIn: rows) }
 
     private func start() {
-        PolicyStore.lastPolicy = policy
+        PolicyStore.remember(policy, toMac: false)
         guard let first = request.items.first else { return }
         queue.enqueue(TransferJob(
             deviceID: request.destinationDeviceID, deviceName: request.destinationDeviceName,

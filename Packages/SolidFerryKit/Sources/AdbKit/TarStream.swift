@@ -68,15 +68,7 @@ struct TarReader {
             let chunk = min(remaining, 256 * 1024)
             try socket.ensure(chunk)
             if let fd {
-                var offset = 0
-                while offset < chunk {
-                    let n = Darwin.write(fd, socket.head + offset, chunk - offset)
-                    if n < 0 {
-                        if errno == EINTR { continue }
-                        throw DeviceFSError.localWrite(errnoDescription())
-                    }
-                    offset += n
-                }
+                try writeFully(fd, UnsafeRawBufferPointer(start: socket.head, count: chunk))
                 progress(chunk)
             }
             socket.consume(chunk)

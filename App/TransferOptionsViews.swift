@@ -4,9 +4,11 @@ import SwiftUI
 import TransferKit
 
 extension TransferSummary {
-    /// "Copies 12 files (2.3 GB) · skips 3 · compares 2 · asks about 1"
-    var footer: String {
-        var parts = [String(localized: "Copies \(copyCount) files (\(ByteFormat.string(copyBytes)))")]
+    /// "Copies 12 files (2.3 GB) · sets the date of 4 · skips 3 · compares 2 · asks about 1"
+    func footer(moving: Bool = false) -> String {
+        var parts = [moving ? String(localized: "Moves \(copyCount) files (\(ByteFormat.string(copyBytes)))")
+            : String(localized: "Copies \(copyCount) files (\(ByteFormat.string(copyBytes)))")]
+        if dateCount > 0 { parts.append(String(localized: "sets the date of \(dateCount)")) }
         if skipCount > 0 { parts.append(String(localized: "skips \(skipCount)")) }
         if hashCount > 0 { parts.append(String(localized: "compares \(hashCount)")) }
         if askCount > 0 { parts.append(String(localized: "asks about \(askCount)")) }
@@ -162,21 +164,31 @@ struct FileComparisonPanel: View {
     /// The policy as files are actually compared (an upload to a phone that doesn't keep dates
     /// compares by size), when it differs from the one being edited.
     var comparedAs: TransferPolicy?
+    /// Files are moved, not copied (within one phone).
+    var moving = false
+    /// "Only set the date" is offered (downloads to this Mac).
+    var datesApply = false
+    /// Reads the selection and the destination again (the list's refresh button).
+    var refresh: (() -> Void)?
     @State private var filter = FileFilter.all
 
     private var compared: TransferPolicy { comparedAs ?? policy }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            PolicyBar(policy: $policy, hashAvailable: hashAvailable, uploadDates: uploadDates)
+            PolicyBar(policy: $policy, hashAvailable: hashAvailable, uploadDates: uploadDates, datesApply: datesApply)
                 .disabled(previewing && summary == nil)
             Divider()
-            if previewing {
-                preview
-            } else {
-                PreviewButton { previewing = true }
+            // The list is always there and takes the room the window has; before the preview
+            // it's empty, with the button that fills it in the middle. Filling it doesn't
+            // change its room, so the window keeps the size it's given.
+            VStack(alignment: .leading, spacing: 10) {
+                files
             }
+            .frame(minHeight: Self.filesMinHeight, maxHeight: .infinity, alignment: .top)
+            .layoutPriority(1)
         }
+        .layoutPriority(1)
         #if DEBUG
         // Development: -dev.dialogFilter new|same|different, for checking it in snapshots.
         .onAppear {
@@ -192,11 +204,14 @@ struct FileComparisonPanel: View {
         #endif
     }
 
-    @ViewBuilder private var preview: some View {
-        FilterBar(summary: summary, hashMode: policy.existing == .ifHashDiffers, filter: $filter)
+    @ViewBuilder private var files: some View {
+        FilterBar(summary: previewing ? summary : nil, previewing: previewing,
+                  hashMode: policy.existing == .ifHashDiffers, filter: $filter, refresh: refresh)
         ZStack {
-            FileTable(rows: visibleRows, policy: compared, choices: $choices)
-            if rows == nil {
+            FileTable(rows: previewing ? visibleRows : [], policy: compared, choices: $choices, moving: moving)
+            if !previewing {
+                PreviewButton { previewing = true }
+            } else if rows == nil {
                 VStack(spacing: 8) {
                     ProgressView()
                     if let progress, progress.total > 0 {
@@ -211,48 +226,58 @@ struct FileComparisonPanel: View {
                 Text("No files here").foregroundStyle(.secondary)
             }
         }
-        .frame(minHeight: 200, idealHeight: 300)
+        .frame(minHeight: 120, idealHeight: 300, maxHeight: .infinity)
+        .layoutPriority(1)
     }
+
+    /// The least room for the list: its filter bar and a few rows.
+    private static let filesMinHeight: CGFloat = 200
 
     private var visibleRows: [FileRow] {
         rows.map { FileRow.visible($0, filter: filter, sizeOnlyMatch: compared.matchesBySizeInList) } ?? []
     }
 }
 
-/// Opens the preview: a wide target, since it's the one thing to click in its place.
+/// Fills the list: a large button in the middle of it while it's empty, small enough to fit
+/// the list at the window's least height.
 private struct PreviewButton: View {
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 12) {
-                Image(systemName: "list.bullet.rectangle")
-                    .imageScale(.large)
-                    .foregroundStyle(.secondary)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Preview the files")
-                    Text("See which files are already there, and choose for each one. Not needed to start.")
-                        .appFont(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                Image(systemName: "list.bullet.rectangle").imageScale(.large)
+                Text("Preview results and choose per file")
             }
-            .padding(.horizontal, 14)
-            .frame(maxWidth: .infinity, minHeight: 64)
-            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-            .contentShape(RoundedRectangle(cornerRadius: 8))
+            .appFont(.title2, weight: .medium)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(LargeTileButtonStyle())
+        .padding()
+    }
+}
+
+/// A big rounded rectangle that reads as a button: tinted, outlined, darker while pressed.
+private struct LargeTileButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 10)
+        configuration.label
+            .foregroundStyle(Color.accentColor)
+            .padding(.horizontal, 36)
+            .frame(minHeight: 80)
+            .background(Color.accentColor.opacity(configuration.isPressed ? 0.24 : 0.12), in: shape)
+            .overlay(shape.strokeBorder(Color.accentColor.opacity(0.55), lineWidth: 1))
+            .contentShape(shape)
     }
 }
 
 /// The colored counts, doubling as filters for the list (click again to show all).
 private struct FilterBar: View {
     let summary: TransferSummary?
+    /// Before the preview there's nothing to count yet.
+    let previewing: Bool
     let hashMode: Bool
     @Binding var filter: FileFilter
+    let refresh: (() -> Void)?
 
     var body: some View {
         HStack(spacing: 6) {
@@ -273,10 +298,18 @@ private struct FilterBar: View {
                 if summary.existingCount == 0 {
                     Text("Nothing is in the way.").foregroundStyle(.secondary).padding(.leading, 4)
                 }
-            } else {
+            } else if previewing {
                 Text("Counting…").foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
+            if previewing, let refresh {
+                Button(action: refresh) {
+                    Label("Refresh", systemImage: "arrow.clockwise").labelStyle(.iconOnly)
+                }
+                .buttonStyle(.borderless)
+                .disabled(summary == nil)
+                .help("Read the files and the destination again")
+            }
         }
         .frame(minHeight: 24)
     }
@@ -312,6 +345,7 @@ struct PolicyBar: View {
     @Binding var policy: TransferPolicy
     let hashAvailable: Bool
     var uploadDates = UploadDatesState.notApplicable
+    var datesApply = false
 
     private var differs: Bool { policy.existing == .ifSizeOrDateDiffers || policy.existing == .ifHashDiffers }
 
@@ -336,6 +370,16 @@ struct PolicyBar: View {
                         Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
                         datesNote.gridCellColumns(2)
                     }
+                }
+            }
+            if datesApply && [.skip, .ifSizeOrDateDiffers, .ifHashDiffers].contains(policy.existing) {
+                GridRow {
+                    Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
+                    Toggle("When only the date differs, just set the date", isOn: $policy.datesOnlyWhenSameSize)
+                        .help(policy.existing == .ifHashDiffers
+                              ? "A file already here with the same contents gets the date from the device; nothing is copied."
+                              : "A file already here with the same size gets the date from the device; nothing is copied.")
+                        .gridCellColumns(2)
                 }
             }
             GridRow {
@@ -410,6 +454,7 @@ struct FileTable: View {
     let rows: [FileRow]
     let policy: TransferPolicy
     @Binding var choices: [String: ConflictChoice]
+    var moving = false
 
     var body: some View {
         Table(rows) {
@@ -467,7 +512,7 @@ struct FileTable: View {
     @ViewBuilder private func actionCell(_ row: FileRow) -> some View {
         switch row.existing {
         case .none:
-            Text("Copy").foregroundStyle(.secondary)
+            Text(FileDecision.transfer.actionTitle(moving: moving)).foregroundStyle(.secondary)
         case .directory:
             Text("Skipped (a folder has this name)").foregroundStyle(.secondary).lineLimit(1)
         case .file:
@@ -477,7 +522,7 @@ struct FileTable: View {
                 set: { action in
                     if case .choice(let choice) = action { choices[row.relativePath] = choice } else { choices[row.relativePath] = nil }
                 }
-            ), items: [.option(RowAction.policy, String(localized: "As set above: \(policyDecision.actionTitle)")), .divider]
+            ), items: [.option(RowAction.policy, String(localized: "As set above: \(policyDecision.actionTitle(moving: moving))")), .divider]
                 + ConflictChoice.allCases.map { .option(RowAction.choice($0), $0.title) },
             weight: choices[row.relativePath] == nil ? .regular : .semibold)
         }
@@ -500,10 +545,11 @@ extension ConflictChoice {
 }
 
 extension FileDecision {
-    /// What happens to a file in the way, in a word or two.
-    var actionTitle: String {
+    /// What happens to a file, in a word or two.
+    func actionTitle(moving: Bool = false) -> String {
         switch self {
-        case .transfer: String(localized: "Copy")
+        case .transfer: moving ? String(localized: "Move") : String(localized: "Copy")
+        case .setDate: String(localized: "Set date only")
         case .overwrite: String(localized: "Overwrite")
         case .keepBoth: String(localized: "Keep both")
         case .skipIdentical, .skipExisting, .typeConflict: String(localized: "Skip")

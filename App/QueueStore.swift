@@ -20,6 +20,35 @@ struct SavedJob: Codable {
     /// Names in the phone folders it writes to, as planned: "keep both" names chosen after a
     /// relaunch avoid them.
     var remoteNames: [String: FolderNames]? = nil
+    var id: UUID? = nil
+    var startedAt: Date? = nil
+    var finishedAt: Date? = nil
+    /// How a finished job ended (kept for its results until removed from the transfers window).
+    var ended: Ended? = nil
+    var note: String? = nil
+
+    enum Ended: Codable, Equatable {
+        case completed
+        case failed(String)
+        case cancelled
+
+        init?(_ state: JobState) {
+            switch state {
+            case .completed: self = .completed
+            case .failed(let message): self = .failed(message)
+            case .cancelled: self = .cancelled
+            default: return nil
+            }
+        }
+
+        var state: JobState {
+            switch self {
+            case .completed: .completed
+            case .failed(let message): .failed(message)
+            case .cancelled: .cancelled
+            }
+        }
+    }
 }
 
 enum QueueStore {
@@ -33,7 +62,8 @@ enum QueueStore {
     /// leaves its job behind).
     static var isEnabled: Bool {
         #if DEBUG
-        UserDefaults.standard.string(forKey: "dev.quitWhenDone") == nil
+        UserDefaults.standard.bool(forKey: "dev.keepQueue")
+            || UserDefaults.standard.string(forKey: "dev.quitWhenDone") == nil
             && UserDefaults.standard.string(forKey: "dev.snapshot") == nil
         #else
         true
@@ -88,6 +118,50 @@ enum QueueStore {
             log.error("saved transfers couldn't be read (moved to \(aside.lastPathComponent, privacy: .public)): \(String(describing: error), privacy: .public)")
             return []
         }
+    }
+
+    /// Finished jobs, one file each, written once when they end and removed with them from the
+    /// transfers window.
+    private static var historyFolder: URL {
+        url.deletingLastPathComponent().appendingPathComponent("Finished", isDirectory: true)
+    }
+
+    private static func historyURL(_ id: UUID) -> URL {
+        historyFolder.appendingPathComponent("\(id.uuidString).json")
+    }
+
+    static func saveFinished(_ job: SavedJob) {
+        guard isEnabled, let id = job.id else { return }
+        writer.async {
+            do {
+                try FileManager.default.createDirectory(at: historyFolder, withIntermediateDirectories: true)
+                try JSONEncoder().encode(job).write(to: historyURL(id), options: .atomic)
+            } catch {
+                log.error("couldn't save a finished transfer: \(String(describing: error), privacy: .public)")
+            }
+        }
+    }
+
+    static func removeFinished(_ ids: [UUID]) {
+        guard isEnabled, !ids.isEmpty else { return }
+        writer.async {
+            for id in ids { try? FileManager.default.removeItem(at: historyURL(id)) }
+        }
+    }
+
+    /// Finished jobs, oldest first. One that can't be read is dropped (with its file).
+    static func loadFinished() -> [SavedJob] {
+        guard isEnabled, let names = try? FileManager.default.contentsOfDirectory(atPath: historyFolder.path) else { return [] }
+        let jobs = names.filter { $0.hasSuffix(".json") }.compactMap { name -> SavedJob? in
+            let file = historyFolder.appendingPathComponent(name)
+            guard let data = try? Data(contentsOf: file), let job = try? JSONDecoder().decode(SavedJob.self, from: data),
+                  job.ended != nil else {
+                try? FileManager.default.removeItem(at: file)
+                return nil
+            }
+            return job
+        }
+        return jobs.sorted { ($0.finishedAt ?? .distantPast) < ($1.finishedAt ?? .distantPast) }
     }
 
     /// Writes in the background, in order; nothing left to resume removes the file.

@@ -56,6 +56,28 @@ struct SolidFerryApp: App {
         }
         .defaultSize(width: 640, height: 420)
         .keyboardShortcut("t", modifiers: [.command, .option])
+
+        WindowGroup("Transfer Details", id: WindowID.transferResults, for: UUID.self) { $id in
+            TransferResultsView(jobID: id)
+                .environment(queue)
+                .textArea(.panels)
+        }
+        .defaultSize(width: 1180, height: 620)
+
+        transferDialogs
+    }
+}
+
+extension SolidFerryApp {
+    /// The download, upload and device-copy dialogs (`TransferDialogs`). One that macOS brings
+    /// back at launch has nothing to show and closes (`TransferDialogWindow`).
+    private var transferDialogs: some Scene {
+        WindowGroup(id: WindowID.transferDialog, for: UUID.self) { $id in
+            TransferDialogWindow(id: id)
+                .environment(queue)
+        }
+        .defaultSize(width: 860, height: 760)
+        .windowResizability(.contentMinSize)
     }
 }
 
@@ -133,5 +155,7 @@ private struct ToolbarStyleCommands: Commands {
 enum WindowID {
     static let browser = "browser"
     static let transfers = "transfers"
+    static let transferResults = "transferResults"
+    static let transferDialog = "transferDialog"
     static let wireless = "wireless"
 }

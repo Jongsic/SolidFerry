@@ -12,20 +12,6 @@ import TransferKit
 @MainActor @Observable
 final class TransferQueue {
     private(set) var jobs: [TransferJob] = []
-    var isPaused = false {
-        didSet {
-            guard isPaused != oldValue else { return }
-            if isPaused {
-                // A job already being paused or cancelled on its own stays that way.
-                for (job, task) in running.values where job.stopReason == nil {
-                    job.stopReason = .pauseAll
-                    task.cancel()
-                }
-            } else {
-                pump()
-            }
-        }
-    }
 
     private let hub: DeviceHub
     /// Running job per device ID.
@@ -38,7 +24,8 @@ final class TransferQueue {
 
     init(hub: DeviceHub) {
         self.hub = hub
-        jobs = QueueStore.load().map(TransferJob.init(saved:))
+        // Finished jobs first (their results stay until removed), then the ones to resume.
+        jobs = (QueueStore.loadFinished() + QueueStore.load()).map(TransferJob.init(saved:))
         Self.removeLeftoverZips()
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -113,23 +100,6 @@ final class TransferQueue {
         persist()
     }
 
-    /// Nothing runs for a pause: all of them, or each unfinished job on its own (jobs come back
-    /// paused after a relaunch).
-    var isAllPaused: Bool {
-        isPaused || (hasUnfinishedJobs && jobs.allSatisfy { $0.state.isFinished || $0.state == .paused })
-    }
-
-    func toggleAllPaused() {
-        if isAllPaused {
-            for job in jobs where job.state == .paused { job.state = .queued }
-            isPaused = false
-            persist()
-            pump()
-        } else {
-            isPaused = true
-        }
-    }
-
     func resume(_ job: TransferJob) {
         if job.state == .paused { job.state = .queued }
         pump()
@@ -164,6 +134,8 @@ final class TransferQueue {
             job.downloadPlan = nil
             job.uploadPlan = nil
         }
+        job.finishedAt = nil
+        QueueStore.removeFinished([job.id])
         job.state = .queued
         pump()
     }
@@ -173,18 +145,28 @@ final class TransferQueue {
         if !job.state.isFinished { finish(job, error: CancellationError()) }
         removePartialDownloads(job)
         jobs.removeAll { $0 === job }
+        QueueStore.removeFinished([job.id])
         persist()
     }
 
     func clearFinished() {
+        QueueStore.removeFinished(jobs.filter(\.state.isFinished).map(\.id))
         jobs.removeAll { $0.state.isFinished }
         persist()
     }
 
-    func move(from source: IndexSet, to destination: Int) {
-        jobs.move(fromOffsets: source, toOffset: destination)
+    /// Puts `moving` just before `target` (at the end without one): each device runs its jobs
+    /// in this order.
+    func reorder(_ moving: [TransferJob], before target: TransferJob?) {
+        let ids = Set(moving.map(\.id))
+        guard target.map({ !ids.contains($0.id) }) ?? true else { return }
+        jobs.removeAll { ids.contains($0.id) }
+        let at = target.flatMap { t in jobs.firstIndex { $0 === t } } ?? jobs.count
+        jobs.insert(contentsOf: moving, at: at)
         persist()
     }
+
+    func job(_ id: UUID) -> TransferJob? { jobs.first { $0.id == id } }
 
     func resolveConflict(in job: TransferJob, at index: Int, answer: ConflictChoice, applyToRest: Bool) {
         let targets = applyToRest ? job.conflictIndexes : [index]
@@ -219,7 +201,6 @@ final class TransferQueue {
     }
 
     private func pump() {
-        guard !isPaused else { return }
         // First runnable job of every device that isn't busy.
         for job in jobs where running[job.deviceID] == nil && isRunnable(job) {
             // Cleared here, not when the task starts, so a pause or cancel in between counts.
@@ -302,7 +283,7 @@ final class TransferQueue {
                 case .download, .upload: fs.capabilities.deviceHashing
                 case .deviceCopy: false
                 }
-                job.policy = job.policy.normalized(hashAvailable: hashing)
+                job.policy = job.policy.normalized(hashAvailable: hashing, toMac: job.route.isDownload)
                 switch job.route {
                 case .download: try await classifyDownload(job, fs: fs)
                 case .upload where job.packAsZip: try await prepareZip(job, fs: fs)
@@ -318,9 +299,11 @@ final class TransferQueue {
             }
             try await createDirectories(job, fs: fs)
             try checkStop()
+            if job.startedAt == nil { job.startedAt = .now }
             job.state = .running
             try await transferFiles(job, fs: fs)
             try checkStop()
+            await recordResults(job, fs: fs)
             if !fs.capabilities.keepsUploadDates {
                 // Seen on a file sent through this connection; for next time. ("Kept" is only
                 // remembered from `UploadDates.probe`: a connection that hasn't seen a date
@@ -353,9 +336,6 @@ final class TransferQueue {
                 return
             case .pause:
                 job.state = .paused
-                return
-            case .pauseAll:
-                job.state = .queued
                 return
             case nil:
                 break
@@ -543,7 +523,7 @@ final class TransferQueue {
 
     private nonisolated static func initialState(_ decision: FileDecision) -> ItemState {
         switch decision {
-        case .transfer, .overwrite, .keepBoth, .needsHash, .ask: .pending
+        case .transfer, .overwrite, .keepBoth, .needsHash, .ask, .setDate: .pending
         case .skipIdentical, .skipExisting: .skipped
         case .typeConflict: .failed(String(localized: "A folder with the same name exists."))
         }
@@ -563,7 +543,7 @@ final class TransferQueue {
 
     /// The decision for a file "copy if contents differ" compared, once its hashes are in.
     private func decide(_ i: Int, same: Bool, in job: TransferJob, reserved: inout FolderNames) {
-        let decision = FileDecision.afterHash(equal: same, job.policy)
+        let decision = FileDecision.afterHash(equal: same, dateMatches: job.items[i].datesMatch, job.policy)
         let destination = decision == .keepBoth
             ? renamedDestination(job, job.items[i].destination, reserved: &reserved) : job.items[i].destination
         job.update(i) {
@@ -576,11 +556,18 @@ final class TransferQueue {
     private func createDirectories(_ job: TransferJob, fs: any DeviceFileSystem) async throws {
         switch job.route {
         case .download(_, let destination):
-            let fm = FileManager.default
-            try fm.createDirectory(at: destination, withIntermediateDirectories: true)
-            for dir in job.downloadPlan?.directories ?? [] {
-                try? fm.createDirectory(at: destination.appendingPathComponent(dir), withIntermediateDirectories: true)
-            }
+            // Off the main thread: a slow disk would hold up the app.
+            let dirs = job.downloadPlan?.directories ?? []
+            job.destinationVolume = try await Task.detached {
+                try DiskWait.during {
+                    let fm = FileManager.default
+                    try fm.createDirectory(at: destination, withIntermediateDirectories: true)
+                    for dir in dirs {
+                        try? fm.createDirectory(at: destination.appendingPathComponent(dir), withIntermediateDirectories: true)
+                    }
+                    return try? destination.resourceValues(forKeys: [.volumeLocalizedNameKey]).volumeLocalizedName
+                }
+            }.value
         case .deviceCopy(_, _, _, let destination, _):
             // Folders for file-by-file items (whole-folder operations create their own).
             let wholeTops = Set(job.items.filter(\.isFolder).map(\.relativePath))
@@ -619,14 +606,13 @@ final class TransferQueue {
     private static let saveInterval: Duration = .seconds(5)
 
     private func transferFiles(_ job: TransferJob, fs: any DeviceFileSystem) async throws {
-        let pending = job.items.indices.filter {
-            job.items[$0].state == .pending && (job.items[$0].decision.transfers || job.items[$0].decision == .needsHash)
-        }
-        // Files compared by contents are hashed on the side from the start; each waits for its
-        // answer only when its turn comes, and the files still go in order.
-        let comparison = pending.contains { job.items[$0].decision == .needsHash } ? ContentComparison(job, fs: fs) : nil
-        defer { comparison?.cancel() }
         var reserved = FolderNames(job.items.compactMap { $0.destination.localURL?.path })
+        // Files compared by contents are all decided first, so what goes is settled before
+        // anything is sent (and the speed shown is the transfer's alone).
+        try await compareContents(job, fs: fs, reserved: &reserved)
+        try await setDates(job)
+        job.state = .running
+        let pending = job.items.indices.filter { job.items[$0].state == .pending && job.items[$0].decision.transfers }
         // Otherwise (MTP) two at once. The connection still takes one request at a time, but the
         // next file is already waiting when one ends, rather than the line standing empty while
         // this picks and opens it. Between two phones, one also comes in from the source while
@@ -635,29 +621,43 @@ final class TransferQueue {
         let sizesWrap = !fs.capabilities.exactLargeSizes
         job.doneBytes = job.counts.doneBytes
 
+        let onDevice = job.route.sourceDeviceID == job.deviceID
         let ticker = Task { [weak job] in
-            var lastBytes = job?.doneBytes ?? 0
-            var lastTime = ContinuousClock.now
+            // The speed is what moved over the last few seconds: per tick it jumps between
+            // bursts and pauses (files finishing, a disk taking its time).
+            var samples: [(time: ContinuousClock.Instant, bytes: UInt64)] = []
+            var lastMove = ContinuousClock.now
             while !Task.isCancelled, let job {
                 try? await Task.sleep(for: .milliseconds(250))
                 // Stopped while asleep: the job has settled its numbers; don't overwrite them.
                 if Task.isCancelled { break }
                 let inFlight = job.runtime.inFlight.values.reduce(0) { $0 + $1.withLock { $0 } }
-                job.doneBytes = job.counts.doneBytes + UInt64(inFlight)
+                let bytes = job.counts.doneBytes + UInt64(inFlight)
                 let now = ContinuousClock.now
-                let seconds = (now - lastTime) / .seconds(1)
-                if seconds > 0 {
-                    // A file that stopped or failed midway takes its bytes back: that's no speed,
-                    // not a negative one (as an unsigned count it would wrap to an enormous rate).
-                    let gained = job.doneBytes >= lastBytes ? job.doneBytes - lastBytes : 0
-                    let instant = Double(gained) / seconds
-                    job.bytesPerSecond = job.bytesPerSecond == 0 ? instant : job.bytesPerSecond * 0.7 + instant * 0.3
+                // A file that stopped or failed midway takes its bytes back: start over from there.
+                if let last = samples.last, bytes < last.bytes { samples = [] }
+                if samples.last?.bytes != bytes { lastMove = now }
+                samples.append((now, bytes))
+                samples.removeAll { now - $0.time > Self.speedWindow }
+                job.doneBytes = bytes
+                if let first = samples.first, now - first.time >= .milliseconds(500) {
+                    job.bytesPerSecond = Double(bytes - first.bytes) / ((now - first.time) / .seconds(1))
                 }
-                lastBytes = job.doneBytes
-                lastTime = now
+                job.waiting = if now - lastMove < Self.standstill || job.runtime.inFlight.isEmpty {
+                    nil
+                } else if onDevice {
+                    .onDevice
+                } else if job.route.isDownload, let disk = DiskWait.longest, disk >= .milliseconds(500) {
+                    .disk
+                } else {
+                    .device
+                }
             }
         }
-        defer { ticker.cancel() }
+        defer {
+            ticker.cancel()
+            job.waiting = nil
+        }
 
         // Downloads share connections only where they're cheap to run side by side (ADB); MTP
         // has one pipe anyway.
@@ -669,23 +669,8 @@ final class TransferQueue {
 
         try await withThrowingTaskGroup(of: [(Int, ItemFailure?)].self) { group in
             var next = units.makeIterator()
-            /// The unit's files to send now, after any that waited for a comparison are decided.
-            @MainActor func decided(_ unit: [Int]) async throws -> [Int] {
-                guard let comparison else { return unit }
-                for i in unit where job.items[i].decision == .needsHash {
-                    if comparison.answer(i) == nil { job.state = .comparing }
-                    decide(i, same: try await comparison.isSame(i), in: job, reserved: &reserved)
-                }
-                job.state = .running
-                return unit.filter { job.items[$0].state == .pending && job.items[$0].decision.transfers }
-            }
             @MainActor func launch() async throws -> Bool {
-                var ready: [Int] = []
-                while ready.isEmpty {
-                    guard let candidate = next.next() else { return false }
-                    ready = try await decided(candidate)
-                }
-                let unit = ready
+                guard let unit = next.next() else { return false }
                 let counter = OSAllocatedUnfairLock(initialState: 0)
                 for i in unit { job.setState(i, .running) }
                 job.runtime.inFlight[unit[0]] = counter
@@ -825,7 +810,113 @@ final class TransferQueue {
         job.bytesPerSecond = 0
     }
 
+    // MARK: Before and after the files go
+
+    /// Files compared by contents at a time: one command on the phone, this Mac's side in
+    /// parallel meanwhile. Small enough for the count on screen to move.
+    private static let compareBatch = 50
+    /// The speed shown covers this much time.
+    static let speedWindow: Duration = .seconds(3)
+    /// Nothing moved for this long: say what the job waits on instead of a speed.
+    static let standstill: Duration = .seconds(1)
+
+    /// "Copy if contents differ": hashes both sides of every same-size file in the way and
+    /// decides it, in the files' order, before anything is sent.
+    private func compareContents(_ job: TransferJob, fs: any DeviceFileSystem, reserved: inout FolderNames) async throws {
+        let indexes = job.items.indices.filter { job.items[$0].decision == .needsHash && job.items[$0].state == .pending }
+        guard !indexes.isEmpty else { return }
+        job.state = .comparing
+        job.compared = CompareProgress(done: 0, total: indexes.count)
+        defer {
+            job.compared = nil
+            job.currentName = nil
+        }
+        let download = job.route.isDownload
+        for start in stride(from: 0, to: indexes.count, by: Self.compareBatch) {
+            if job.stopReason != nil { throw CancellationError() }
+            let batch = Array(indexes[start..<min(start + Self.compareBatch, indexes.count)])
+            job.currentName = job.items[batch[0]].name
+            let refs = batch.map { job.items[$0].source.remoteRef ?? job.items[$0].destination.remoteRef }
+            let urls = batch.map { job.items[$0].source.localURL ?? job.items[$0].destination.localURL }
+            async let local = localMD5s(urls)
+            // A backend without hashing (a remembered policy reused for an MTP device) treats
+            // same-size files as different rather than guessing they're equal.
+            let remote = fs.capabilities.deviceHashing ? try await fs.contentHashes(refs.compactMap { $0 }) : [:]
+            let localHashes = try await local
+            // Stopped meanwhile: hashes may be missing, which would read as "different".
+            try Task.checkCancellation()
+            if job.stopReason != nil { throw CancellationError() }
+            for (n, i) in batch.enumerated() {
+                let remoteHash = refs[n].flatMap { remote[$0.path] }, localHash = localHashes[n]
+                job.update(i) {
+                    $0.incomingHash = download ? remoteHash : localHash
+                    $0.existingHash = download ? localHash : remoteHash
+                }
+                decide(i, same: remoteHash != nil && remoteHash == localHash, in: job, reserved: &reserved)
+            }
+            job.compared?.done = start + batch.count
+        }
+    }
+
+    /// Files already on this Mac that only take the incoming file's date.
+    private func setDates(_ job: TransferJob) async throws {
+        let work = job.items.indices.compactMap { i -> (Int, URL, Date)? in
+            let item = job.items[i]
+            guard item.decision == .setDate, item.state == .pending, let url = item.destination.localURL,
+                  let modified = item.modified else { return nil }
+            return (i, url, modified)
+        }
+        guard !work.isEmpty else { return }
+        let results = await Task.detached {
+            work.map { i, url, modified -> (Int, String?) in
+                DiskWait.during {
+                    do {
+                        try FileManager.default.setAttributes([.modificationDate: modified], ofItemAtPath: url.path)
+                        return (i, nil)
+                    } catch {
+                        return (i, UserMessage.describe(error))
+                    }
+                }
+            }
+        }.value
+        for (i, failure) in results {
+            job.setState(i, failure.map(ItemState.failed) ?? .done)
+        }
+    }
+
+    /// What's at the destination of every file the job wrote (or dated), for the results
+    /// window: on this Mac each file, on a device each folder once. Best effort; a file that
+    /// can't be looked at shows no "after".
+    private func recordResults(_ job: TransferJob, fs: any DeviceFileSystem) async {
+        let written = job.items.indices.filter { job.items[$0].state == .done && !job.items[$0].isFolder }
+        guard !written.isEmpty else { return }
+        if job.route.isDownload {
+            let urls = written.map { job.items[$0].destination.localURL }
+            let stamps = await Task.detached {
+                urls.map { url in
+                    DiskWait.during { (try? url?.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])).map { ($0.fileSize.map(UInt64.init), $0.contentModificationDate) } }
+                }
+            }.value
+            for (i, stamp) in zip(written, stamps) {
+                job.update(i) { $0.afterSize = stamp?.0; $0.afterModified = stamp?.1 }
+            }
+            return
+        }
+        let byFolder = Dictionary(grouping: written) { job.items[$0].destination.remoteRef?.parentPath ?? "" }
+        for (folder, indexes) in byFolder where !folder.isEmpty {
+            guard let listing = try? await fs.folderListing(RemoteRef(path: folder)) else { continue }
+            // Big MTP folders list by name; sizes and dates are read for these files only.
+            let found = indexes.compactMap { i in job.items[i].destination.remoteRef.flatMap { listing[$0.name] }.map { (i, $0) } }
+            guard let entries = try? await fs.completingDetails(found.map(\.1)) else { continue }
+            for ((i, _), entry) in zip(found, entries) {
+                job.update(i) { $0.afterSize = entry.size; $0.afterModified = entry.modified }
+            }
+        }
+    }
+
     private func finish(_ job: TransferJob, error: Error?) {
+        job.finishedAt = .now
+        if job.state.isFinished { QueueStore.saveFinished(job.saved) }
         if let zip = job.runtime.temporaryZip {
             try? FileManager.default.removeItem(at: zip)
             job.runtime.temporaryZip = nil
@@ -838,57 +929,6 @@ final class TransferQueue {
 }
 
 private let transferLog = Logger(subsystem: WorkNames.subsystem, category: "transfers")
-
-/// "Copy if contents differ": whether each file in the way is the same on both sides, by item
-/// index, worked out on its own connection while the transfer goes. A batch at a time in the
-/// files' order (the phone in one command per batch, this Mac in parallel, both at once), so the
-/// first files' answers come first.
-@MainActor
-private final class ContentComparison {
-    private static let batch = 200
-    private var same: [Int: Bool] = [:]
-    private var failure: Error?
-    private var task: Task<Void, Never>?
-
-    init(_ job: TransferJob, fs: any DeviceFileSystem) {
-        let indexes = job.items.indices.filter { job.items[$0].decision == .needsHash && job.items[$0].state == .pending }
-        let refs = indexes.map { job.items[$0].source.remoteRef ?? job.items[$0].destination.remoteRef }
-        let urls = indexes.map { job.items[$0].source.localURL ?? job.items[$0].destination.localURL }
-        task = Task { [weak self] in
-            do {
-                for start in stride(from: 0, to: indexes.count, by: Self.batch) {
-                    let range = start..<min(start + Self.batch, indexes.count)
-                    async let local = localMD5s(Array(urls[range]))
-                    // A backend without hashing (a remembered policy reused for an MTP device)
-                    // treats same-size files as different rather than guessing they're equal.
-                    let remote = fs.capabilities.deviceHashing ? try await fs.contentHashes(refs[range].compactMap { $0 }) : [:]
-                    let localHashes = try await local
-                    // Stopped meanwhile: hashes may be missing, which would read as "different".
-                    try Task.checkCancellation()
-                    for (n, i) in range.enumerated() {
-                        self?.same[indexes[i]] = refs[i].flatMap { remote[$0.path] }.map { $0 == localHashes[n] } ?? false
-                    }
-                }
-            } catch {
-                self?.failure = error
-            }
-        }
-    }
-
-    func cancel() { task?.cancel() }
-
-    /// The answer for item `i` if it's in.
-    func answer(_ i: Int) -> Bool? { same[i] }
-
-    /// Waits for the answer for item `i`.
-    func isSame(_ i: Int) async throws -> Bool {
-        while true {
-            if let answer = same[i] { return answer }
-            if let failure { throw failure }
-            try await Task.sleep(for: .milliseconds(50))
-        }
-    }
-}
 
 /// A device's connection dropped mid-job; the job waits for that device.
 private struct ConnectionLost: Error {

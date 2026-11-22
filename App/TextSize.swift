@@ -160,6 +160,12 @@ extension View {
     func scaledFrame(width: CGFloat, height: CGFloat? = nil, alignment: Alignment = .center) -> some View {
         modifier(ScaledFrameModifier(width: width, height: height, alignment: alignment))
     }
+
+    /// Starts at `width` (growing with the text size) and follows its window as it's resized
+    /// (a dialog whose list wants more room).
+    func scaledFrame(minWidth width: CGFloat) -> some View {
+        modifier(ScaledMinFrameModifier(width: width))
+    }
 }
 
 private struct TextAreaModifier: ViewModifier {
@@ -193,6 +199,16 @@ private struct ScaledFrameModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content.frame(width: width * max(1, scale.factor), height: height.map { $0 * max(1, scale.factor) }, alignment: alignment)
+    }
+}
+
+private struct ScaledMinFrameModifier: ViewModifier {
+    let width: CGFloat
+    @Environment(\.textScale) private var scale
+
+    func body(content: Content) -> some View {
+        let width = width * max(1, scale.factor)
+        content.frame(minWidth: width, idealWidth: width, maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
 

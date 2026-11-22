@@ -30,6 +30,8 @@ struct UploadSheet: View {
     @State private var choices: [String: ConflictChoice] = [:]
     @State private var lookedUp: [String: RemoteEntry] = [:]
     @State private var previewing = false
+    /// Bumped by the list's refresh button: the selection and the destination are read again.
+    @State private var refreshes = 0
     @State private var uploadDates = UploadDatesState.checking
     /// Send as a zip to unpack on the phone (offered when the phone doesn't keep dates).
     @State private var packAsZip = UserDefaults.standard.bool(forKey: SettingsKey.zipWhenDatesNotKept)
@@ -79,20 +81,21 @@ struct UploadSheet: View {
                 FileComparisonPanel(policy: $policy, choices: $choices, previewing: $previewing, rows: rows, summary: summary,
                                     progress: compared,
                                     hashAvailable: request.fileSystem.capabilities.deviceHashing, uploadDates: uploadDates,
-                                    comparedAs: comparedPolicy)
+                                    comparedAs: comparedPolicy, refresh: refresh)
                     .onAppear { policy = policy.normalized(hashAvailable: request.fileSystem.capabilities.deviceHashing) }
             }
 
             Divider()
 
-            TransferDialogFooter(outcome: sendsZip ? zipOutcome : summary?.footer, canStart: plan != nil,
+            TransferDialogFooter(outcome: sendsZip ? zipOutcome : summary?.footer(), canStart: plan != nil,
                                  cancel: { dismiss() }, start: start)
         }
         .padding(20)
-        .scaledFrame(width: 780)
+        .scaledFrame(minWidth: 780)
+        .navigationTitle(Text("Upload to \(request.deviceName)"))
         .textArea(.panels)
         .scaledButtons()
-        .task {
+        .task(id: refreshes) {
             do {
                 let sources = request.sources
                 plan = try await stoppable { stop in try UploadPlanner.expand(sources, stop: stop) }
@@ -109,13 +112,23 @@ struct UploadSheet: View {
             case nil: .notApplicable // couldn't tell; compare as usual
             }
         }
-        .task(id: StatKey(files: plan?.files.count, folders: policy.existingFolder, previewing: previewing)) { await compare() }
+        .task(id: StatKey(files: plan?.files.count, folders: policy.existingFolder, previewing: previewing, refreshes: refreshes)) {
+            await compare()
+        }
     }
 
     private struct StatKey: Equatable {
         let files: Int?
         let folders: ExistingFolderPolicy
         let previewing: Bool
+        let refreshes: Int
+    }
+
+    private func refresh() {
+        plan = nil
+        rows = nil
+        scanError = nil
+        refreshes += 1
     }
 
     private var selectionTitle: String {
@@ -176,7 +189,7 @@ struct UploadSheet: View {
     private var keptChoices: [String: ConflictChoice] { FileRow.choices(choices, stillInTheWayIn: rows) }
 
     private func start() {
-        PolicyStore.lastPolicy = policy
+        PolicyStore.remember(policy, toMac: false)
         queue.enqueue(TransferJob(deviceID: request.deviceID, deviceName: request.deviceName,
                                   route: .upload(sources: request.sources, to: request.destination), policy: policy,
                                   uploadPlan: plan, packAsZip: sendsZip, choices: sendsZip ? [:] : keptChoices,

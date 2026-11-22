@@ -15,6 +15,7 @@ import TransferKit
 ///     -dev.download SERIAL|/device/folder|/local/folder   (several of a kind: separated by ";")
 ///     -dev.deviceCopy SERIAL[>TO_SERIAL]|/device/source|/device/folder|copy|move
 ///     -dev.policy skip|overwrite|…                policy for the jobs above
+///     -dev.datesOnly YES                          with it, "when only the date differs, just set the date"
 ///     -dev.deviceName NAME                        the device name the jobs above show
 ///     -dev.resumeSaved YES                        resume jobs saved at the last quit
 ///     -dev.pauseAfter SECONDS                     pause the jobs above that long after one starts
@@ -22,6 +23,10 @@ import TransferKit
 ///                                                 (scripts/pause-test.sh)
 ///     -dev.quitWhenDone FILE                      once the jobs above finish, write their results
 ///                                                 (JSON) to FILE and quit — for scripts/queue-test.sh
+///     -dev.traceProgress FILE                     every 100 ms, the jobs above's progress and how late
+///                                                 the main thread ran, a line each, into FILE
+///     -dev.keepQueue YES                          use the saved queue even with -dev.snapshot or
+///                                                 -dev.quitWhenDone (which otherwise leave it alone)
 ///     -dev.wifi SERIAL                            press "Connect over Wi-Fi" once it's ready
 ///     -dev.snapshot DIR                           capture every window into DIR (DevelopmentSnapshots)
 ///     -dev.snapshotDelay SECONDS                  first capture after this long (4)
@@ -37,7 +42,8 @@ import TransferKit
 ///     -dev.dialogFilter new|same|different        the dialog list's filter (FileComparisonPanel) with its
 ///                                                 preview open
 ///     -dev.connectionPanel SERIAL                 open that device's connection panel
-///     -dev.showWindow settings|transfers|wireless with -dev.snapshot: open that window
+///     -dev.showWindow settings|transfers|wireless|results[,…]  with -dev.snapshot: open those windows
+///                                                 (results: the first job above)
 ///     -dev.openTabs SERIAL:/path;…                more browser windows, as tabs of the first
 ///     -dev.settingsSection general|devices|transfers|viewer  show that Settings tab
 ///     -dev.photoService on|off                    Settings shows the photo service setting that way,
@@ -68,8 +74,12 @@ enum DevelopmentLaunchArguments {
         return BrowserTarget(deviceID: String(spec[..<colon]), path: String(spec[spec.index(after: colon)...]))
     }
 
+    /// The first job the arguments queued (-dev.showWindow results).
+    private(set) static var firstJobID: UUID?
+
     static func apply(to queue: TransferQueue, hub: DeviceHub) {
         let jobs = enqueueJobs(on: queue)
+        firstJobID = jobs.first?.id
         if let path = defaults.string(forKey: "dev.quitWhenDone") {
             Task {
                 while !jobs.allSatisfy(\.state.isFinished) { try? await Task.sleep(for: .milliseconds(300)) }
@@ -93,6 +103,7 @@ enum DevelopmentLaunchArguments {
                 jobs.forEach(queue.resume)
             }
         }
+        if let path = defaults.string(forKey: "dev.traceProgress"), !jobs.isEmpty { traceProgress(jobs, to: path) }
         if let serial = defaults.string(forKey: "dev.wifi") {
             Task {
                 // Wait for the phone to be ready over adb, then ask once.
@@ -104,6 +115,34 @@ enum DevelopmentLaunchArguments {
                     try? await Task.sleep(for: .milliseconds(500))
                 }
             }
+        }
+    }
+
+    /// -dev.traceProgress FILE: every 100 ms until the jobs finish, a line per job (seconds since
+    /// launch, state, bytes done, the speed shown, files done/skipped, files in flight, the current
+    /// name) and how late this main-actor tick ran ("late"): a stalled main thread shows there.
+    private static func traceProgress(_ jobs: [TransferJob], to path: String) {
+        FileManager.default.createFile(atPath: path, contents: nil)
+        guard let file = FileHandle(forWritingAtPath: path) else { return }
+        Task {
+            let start = ContinuousClock.now
+            var expected = start
+            while !jobs.allSatisfy(\.state.isFinished) {
+                expected += .milliseconds(100)
+                try? await Task.sleep(until: expected)
+                let now = ContinuousClock.now
+                let late = (now - expected) / .milliseconds(1)
+                let seconds = (now - start) / .seconds(1)
+                for (n, job) in jobs.enumerated() {
+                    let line = String(format: "%.2f job%d late=%.0fms state=%@ bytes=%llu speed=%.0f done=%d skipped=%d inflight=%d wait=%@ compared=%d name=%@\n",
+                                      seconds, n, late, String(describing: job.state), job.doneBytes, job.bytesPerSecond,
+                                      job.counts.done, job.counts.skipped, job.runtime.inFlight.count,
+                                      job.waiting.map { String(describing: $0) } ?? "-", job.compared?.done ?? -1, job.currentName ?? "-")
+                    file.write(Data(line.utf8))
+                }
+                if now > expected { expected = now }
+            }
+            try? file.close()
         }
     }
 
@@ -140,7 +179,7 @@ enum DevelopmentLaunchArguments {
         // The name jobs show for their device (-dev.deviceName), as if queued from its window.
         func name(_ serial: String) -> String { defaults.string(forKey: "dev.deviceName") ?? serial }
         let policy = TransferPolicy(existing: defaults.string(forKey: "dev.policy").flatMap(ExistingFilePolicy.init) ?? .skip,
-                                    whenDifferent: .overwrite)
+                                    whenDifferent: .overwrite, datesOnlyWhenSameSize: defaults.bool(forKey: "dev.datesOnly"))
         // Several jobs of a kind: specs separated by ";".
         func specs(_ key: String, parts: Int) -> [[String]] {
             (defaults.string(forKey: key) ?? "").split(separator: ";").compactMap { spec in

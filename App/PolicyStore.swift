@@ -16,6 +16,14 @@ enum PolicyStore {
         }
     }
 
+    /// Remembers the options of a transfer that's starting. "Only set the date" is offered for
+    /// downloads alone; another kind of transfer keeps what it was.
+    static func remember(_ policy: TransferPolicy, toMac: Bool) {
+        var policy = policy
+        if !toMac { policy.datesOnlyWhenSameSize = lastPolicy.datesOnlyWhenSameSize }
+        lastPolicy = policy
+    }
+
     private static let destinationKey = SettingsKey.lastDownloadFolder
 
     static var lastDestination: URL {

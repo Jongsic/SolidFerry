@@ -66,8 +66,17 @@ public final class LocalPipe: Sendable {
     }
 }
 
-/// Writes all of `bytes` to `fd`; a failure is `DeviceFSError.localWrite`.
+/// Writes all of `bytes` to `fd`; a failure is `DeviceFSError.localWrite`. Writing to a disk
+/// file counts as waiting on the disk (`DiskWait`).
 public func writeFully(_ fd: Int32, _ bytes: UnsafeRawBufferPointer) throws {
+    if isDiskFile(fd) {
+        try DiskWait.during { try writeAll(fd, bytes) }
+    } else {
+        try writeAll(fd, bytes)
+    }
+}
+
+private func writeAll(_ fd: Int32, _ bytes: UnsafeRawBufferPointer) throws {
     var written = 0
     while written < bytes.count {
         let n = Darwin.write(fd, bytes.baseAddress! + written, bytes.count - written)

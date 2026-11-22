@@ -34,6 +34,8 @@ struct DownloadSheet: View {
     @State private var compared: (done: Int, total: Int)?
     @State private var choices: [String: ConflictChoice] = [:]
     @State private var previewing = false
+    /// Bumped by the list's refresh button: the selection and the destination are read again.
+    @State private var refreshes = 0
 
     init(request: DownloadRequest) {
         self.request = request
@@ -63,31 +65,47 @@ struct DownloadSheet: View {
             Divider()
 
             FileComparisonPanel(policy: $policy, choices: $choices, previewing: $previewing, rows: rows, summary: summary,
-                                progress: compared, hashAvailable: request.fileSystem.capabilities.deviceHashing)
-                .onAppear { policy = policy.normalized(hashAvailable: request.fileSystem.capabilities.deviceHashing) }
+                                progress: compared, hashAvailable: request.fileSystem.capabilities.deviceHashing,
+                                datesApply: true, refresh: refresh)
+                .onAppear { policy = policy.normalized(hashAvailable: request.fileSystem.capabilities.deviceHashing, toMac: true) }
 
             Divider()
 
-            TransferDialogFooter(outcome: summary?.footer, canStart: true, cancel: { dismiss() }, start: start)
+            TransferDialogFooter(outcome: summary?.footer(), canStart: true, cancel: { dismiss() }, start: start)
         }
         .padding(20)
-        .scaledFrame(width: 780)
+        .scaledFrame(minWidth: 780)
+        .navigationTitle("Download to Mac")
         .textArea(.panels)
         .scaledButtons()
-        .task(id: previewing) { if previewing, plan == nil { await scan() } }
+        .task(id: ScanKey(previewing: previewing, refreshes: refreshes)) { if previewing, plan == nil { await scan() } }
         .onDisappear {
             // Closed without queueing: release Finder's wait on the promises.
             if !queued { request.completions.forEach { $0(CocoaError(.userCancelled)) } }
         }
-        .task(id: StatKey(files: plan?.files.count, destination: destination, folders: policy.existingFolder)) {
+        .task(id: StatKey(files: plan?.files.count, destination: destination, folders: policy.existingFolder, refreshes: refreshes)) {
             await statDestination()
         }
+    }
+
+    private struct ScanKey: Equatable {
+        let previewing: Bool
+        let refreshes: Int
     }
 
     private struct StatKey: Equatable {
         let files: Int?
         let destination: URL
         let folders: ExistingFolderPolicy
+        let refreshes: Int
+    }
+
+    private func refresh() {
+        plan = nil
+        rows = nil
+        scanned = 0
+        scanError = nil
+        refreshes += 1
     }
 
     /// "12 files · 2.3 GB", or the scan's progress; before a preview, what was selected.
@@ -108,12 +126,15 @@ struct DownloadSheet: View {
     }
 
     private func scan() async {
+        scanError = nil
         do {
             plan = try await TransferPlanner.expand(request.entries, in: request.fileSystem, progress: { count in
                 Task { @MainActor in scanned = count }
             })
+        } catch is CancellationError {
+            // Replaced by a newer scan (or the dialog closed); that one reports.
         } catch {
-            scanError = UserMessage.describe(error)
+            if !Task.isCancelled { scanError = UserMessage.describe(error) }
         }
     }
 
@@ -155,7 +176,7 @@ struct DownloadSheet: View {
     private var keptChoices: [String: ConflictChoice] { FileRow.choices(choices, stillInTheWayIn: rows) }
 
     private func start() {
-        PolicyStore.lastPolicy = policy
+        PolicyStore.remember(policy, toMac: true)
         if request.droppedAt == nil { PolicyStore.lastDestination = destination }
         queued = true
         queue.enqueue(TransferJob(deviceID: request.deviceID, deviceName: request.deviceName,

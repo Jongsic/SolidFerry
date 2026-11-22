@@ -37,6 +37,28 @@ private let identical = ExistingItem.file(sizeMatches: true, dateMatches: true)
     #expect(FileDecision.afterHash(equal: false, policy) == .overwrite)
 }
 
+@Test func datesOnlyForSameSizeFiles() {
+    for existing in [ExistingFilePolicy.skip, .ifSizeOrDateDiffers] {
+        let policy = TransferPolicy(existing: existing, whenDifferent: .overwrite, datesOnlyWhenSameSize: true)
+        #expect(FileDecision.decide(sameSizeOtherDate, policy) == .setDate)
+        #expect(FileDecision.decide(identical, policy) != .setDate)
+        #expect(FileDecision.decide(differs, policy) != .setDate)
+    }
+    // Compared by contents: only same contents with another date.
+    let hash = TransferPolicy(existing: .ifHashDiffers, whenDifferent: .overwrite, datesOnlyWhenSameSize: true)
+    #expect(FileDecision.decide(sameSizeOtherDate, hash) == .needsHash)
+    #expect(FileDecision.afterHash(equal: true, dateMatches: false, hash) == .setDate)
+    #expect(FileDecision.afterHash(equal: true, dateMatches: true, hash) == .skipIdentical)
+    #expect(FileDecision.afterHash(equal: false, dateMatches: false, hash) == .overwrite)
+    // Not for policies that replace or keep both anyway, nor away from this Mac.
+    #expect(FileDecision.decide(sameSizeOtherDate, TransferPolicy(existing: .overwrite, datesOnlyWhenSameSize: true)) == .overwrite)
+    #expect(TransferPolicy(datesOnlyWhenSameSize: true).normalized(hashAvailable: true).datesOnlyWhenSameSize == false)
+    #expect(TransferPolicy(datesOnlyWhenSameSize: true).normalized(hashAvailable: true, toMac: true).datesOnlyWhenSameSize)
+    let summary = TransferSummary(sizes: [1, 1, 1], existing: [sameSizeOtherDate, identical, .none],
+                                  policy: TransferPolicy(existing: .skip, datesOnlyWhenSameSize: true))
+    #expect(summary.dateCount == 1 && summary.skipCount == 1 && summary.copyCount == 1)
+}
+
 @Test func otherPolicies() {
     #expect(FileDecision.decide(identical, TransferPolicy(existing: .skip)) == .skipExisting)
     #expect(FileDecision.decide(identical, TransferPolicy(existing: .overwrite)) == .overwrite)

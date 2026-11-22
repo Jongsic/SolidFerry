@@ -8,7 +8,7 @@ import SwiftUI
 /// without granting screen recording to anything (an app may draw its own windows).
 ///
 ///     <app> -dev.snapshot /path/to/dir [-dev.snapshotDelay 4] [-dev.snapshotCount 1] [-dev.snapshotEvery 3]
-///             [-dev.showWindow settings|transfers|wireless]
+///             [-dev.showWindow settings|transfers|wireless|results[,…]]
 ///
 /// Only the app's own windows are drawn; whatever the file list shows ends up in the images, so
 /// point it at test folders rather than personal files.
@@ -20,11 +20,16 @@ enum DevelopmentSnapshots {
         guard !started else { return }
         started = true
         let defaults = UserDefaults.standard
-        switch defaults.string(forKey: "dev.showWindow") {
-        case "settings": openSettings()
-        case "transfers": openWindow(id: WindowID.transfers)
-        case "wireless": openWindow(id: WindowID.wireless)
-        default: break
+        for window in (defaults.string(forKey: "dev.showWindow") ?? "").split(separator: ",") {
+            switch window {
+            case "settings": openSettings()
+            case "transfers": openWindow(id: WindowID.transfers)
+            case "wireless": openWindow(id: WindowID.wireless)
+            // The results of the first job queued by the launch arguments.
+            case "results":
+                if let id = DevelopmentLaunchArguments.firstJobID { openWindow(id: WindowID.transferResults, value: id) }
+            default: break
+            }
         }
         // -dev.openTabs SERIAL:/path;…: more browser windows, as tabs of the first one.
         if let tabs = defaults.string(forKey: "dev.openTabs") {

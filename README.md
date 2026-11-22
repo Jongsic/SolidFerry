@@ -64,11 +64,16 @@ group or as raw tags, and set how big a file it will read in full.
 ### Transfers you can trust.
 
 - Mac → device, device → Mac and device → device, by drag and drop, copy and paste or menus — all
-  in one queue with progress, pause, resume and retry for failed files. The queue is kept when you
-  quit the app, and it waits if the connection drops.
+  in one queue with progress, pause, resume and retry for failed files. Each device works through
+  its own jobs, so two phones transfer side by side. The queue is kept when you quit the app, and it
+  waits if the connection drops. When nothing is moving it says what it waits for — the phone, or a
+  slow disk on your Mac.
+- Double-click a transfer for its results: for every file what was there before, what came in,
+  what was done and what's there now.
 - You never lose existing files: skip, overwrite, keep both, or decide by size, date or content —
-  and see exactly what will be copied, skipped or replaced before anything starts. An overwrite
-  replaces the old file only after the new one has fully arrived.
+  and see exactly what will be copied, skipped or replaced before anything starts. A file that only
+  differs by its date can get just the date. An overwrite replaces the old file only after the new
+  one has fully arrived.
 - Phones that change the date of files they receive can get them as one ZIP that keeps the
   original dates.
 

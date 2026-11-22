@@ -17,6 +17,10 @@ public struct PartialDownload: Sendable {
     /// Creates (or empties) the partial file. Another download writing the same one at the
     /// same time (same name, same folder) is refused as `alreadyExists`.
     public static func open(for destination: URL, replacing: Bool?) throws -> PartialDownload {
+        try DiskWait.during { try opening(destination, replacing: replacing) }
+    }
+
+    private static func opening(_ destination: URL, replacing: Bool?) throws -> PartialDownload {
         let url = partialDownloadURL(for: destination)
         let fd = Darwin.open(url.path, O_WRONLY | O_CREAT, 0o644)
         guard fd >= 0 else { throw DeviceFSError.localWrite("\(url.path): \(errnoDescription())") }
@@ -35,6 +39,10 @@ public struct PartialDownload: Sendable {
 
     /// Writes all of `bytes`.
     public func write(_ bytes: UnsafeRawBufferPointer) throws {
+        try DiskWait.during { try writeAll(bytes) }
+    }
+
+    private func writeAll(_ bytes: UnsafeRawBufferPointer) throws {
         var written = 0
         while written < bytes.count {
             let n = Darwin.write(fd, bytes.baseAddress! + written, bytes.count - written)
@@ -49,6 +57,10 @@ public struct PartialDownload: Sendable {
     /// Stamps `modified` (best effort: the file is right without it), closes and renames into
     /// place. Closes the file on every path; removes it if it can't be put in place.
     public func finish(modified: Date?) throws {
+        try DiskWait.during { try finishing(modified: modified) }
+    }
+
+    private func finishing(modified: Date?) throws {
         if let modified {
             let seconds = Int(modified.timeIntervalSince1970)
             var times = [timeval(tv_sec: seconds, tv_usec: 0), timeval(tv_sec: seconds, tv_usec: 0)]

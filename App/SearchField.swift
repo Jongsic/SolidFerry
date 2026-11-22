@@ -28,6 +28,7 @@ struct SearchField: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
+    @MainActor
     final class Coordinator: NSObject {
         var parent: SearchField
         init(_ parent: SearchField) { self.parent = parent }

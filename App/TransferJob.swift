@@ -65,11 +65,19 @@ struct JobItem: Codable {
     var state: ItemState
     /// A whole folder handled in one operation (same-device copy/move into a free name).
     var isFolder = false
+    /// Content hashes, when the file was compared by contents: the incoming file's and the one
+    /// that was in the way.
+    var incomingHash: String?
+    var existingHash: String?
+    /// What's at the destination once the job is done with the file (the results window).
+    var afterSize: UInt64?
+    var afterModified: Date?
 }
 
 extension JobItem {
     private enum CodingKeys: String, CodingKey {
         case name, relativePath, size, modified, source, destination, existingSize, existingModified, decision, state, isFolder
+        case incomingHash, existingHash, afterSize, afterModified
     }
 
     /// Fields added later are optional, so transfers saved by an older version still load.
@@ -86,6 +94,16 @@ extension JobItem {
         decision = try c.decode(FileDecision.self, forKey: .decision)
         state = try c.decode(ItemState.self, forKey: .state)
         isFolder = try c.decodeIfPresent(Bool.self, forKey: .isFolder) ?? false
+        incomingHash = try c.decodeIfPresent(String.self, forKey: .incomingHash)
+        existingHash = try c.decodeIfPresent(String.self, forKey: .existingHash)
+        afterSize = try c.decodeIfPresent(UInt64.self, forKey: .afterSize)
+        afterModified = try c.decodeIfPresent(Date.self, forKey: .afterModified)
+    }
+
+    /// The two files' dates count as the same (as `ExistingItem` compares them).
+    var datesMatch: Bool {
+        guard let modified, let existingModified else { return false }
+        return abs(modified.timeIntervalSince(existingModified)) <= ExistingItem.dateTolerance
     }
 }
 
@@ -100,6 +118,7 @@ enum TransferRoute: Codable {
     case deviceCopy(sources: [RemoteEntry], fromDeviceID: String, fromDeviceName: String, to: RemoteRef, move: Bool)
 
     var isDownload: Bool { if case .download = self { true } else { false } }
+    var isMove: Bool { if case .deviceCopy(_, _, _, _, true) = self { true } else { false } }
     /// The device files come from, when it's not the job's (destination) device.
     var sourceDeviceID: String? { if case .deviceCopy(_, let from, _, _, _) = self { from } else { nil } }
 }
@@ -107,13 +126,28 @@ enum TransferRoute: Codable {
 enum StopReason {
     case cancel
     case pause
-    case pauseAll
+}
+
+/// What a running job is waiting on while no bytes move (said instead of a speed of zero).
+enum JobWait: Equatable {
+    /// This Mac's disk hasn't taken the last data yet (a busy external drive).
+    case disk
+    /// The device hasn't answered yet: sending (downloads) or saving (uploads) the data.
+    case device
+    /// The phone copies or moves files within itself; there's no progress until each is done.
+    case onDevice
+}
+
+/// How far comparing contents has got.
+struct CompareProgress: Equatable {
+    var done: Int
+    let total: Int
 }
 
 /// One copy request between a device and this Mac.
 @MainActor @Observable
 final class TransferJob: Identifiable {
-    let id = UUID()
+    let id: UUID
     let deviceID: String
     let deviceName: String
     let route: TransferRoute
@@ -131,6 +165,15 @@ final class TransferJob: Identifiable {
     var doneBytes: UInt64 = 0
     var bytesPerSecond: Double = 0
     var currentName: String?
+    /// While running: set when nothing has moved for a moment, to say what it's waiting on.
+    var waiting: JobWait?
+    /// While comparing contents (state `.comparing`).
+    var compared: CompareProgress?
+    /// When it first started running, and when it ended (the results window).
+    var startedAt: Date?
+    var finishedAt: Date?
+    /// The name of the Mac disk a download writes to (looked up when it starts).
+    var destinationVolume: String?
 
     /// File-promise completions from a Finder drop, called when the job ends.
     var onFinish: [(Error?) -> Void] = []
@@ -153,6 +196,7 @@ final class TransferJob: Identifiable {
          downloadPlan: TransferPlan? = nil, uploadPlan: UploadPlan? = nil, packAsZip: Bool = false,
          choices: [String: ConflictChoice] = [:], lookedUp: [String: RemoteEntry] = [:],
          completions: [(Error?) -> Void] = []) {
+        id = UUID()
         self.packAsZip = packAsZip
         self.choices = choices
         self.onFinish = completions
@@ -165,8 +209,12 @@ final class TransferJob: Identifiable {
         runtime.lookedUp = lookedUp
     }
 
-    /// A job saved at the last quit; it comes back paused.
+    /// A job saved at the last quit; an unfinished one comes back paused.
     init(saved: SavedJob) {
+        id = saved.id ?? UUID()
+        startedAt = saved.startedAt
+        finishedAt = saved.finishedAt
+        note = saved.note
         packAsZip = saved.packAsZip ?? false
         choices = saved.choices ?? [:]
         deviceID = saved.deviceID
@@ -183,14 +231,18 @@ final class TransferJob: Identifiable {
         counts = ItemCounts(items)
         runtime.remoteNames = saved.remoteNames ?? [:]
         doneBytes = counts.doneBytes
-        state = .paused
+        state = saved.ended?.state ?? .paused
     }
 
     var saved: SavedJob {
-        SavedJob(deviceID: deviceID, deviceName: deviceName, route: route, policy: policy,
-                 downloadPlan: downloadPlan, uploadPlan: uploadPlan,
-                 items: packAsZip ? [] : items, packAsZip: packAsZip, choices: choices,
-                 remoteNames: items.isEmpty || runtime.remoteNames.isEmpty ? nil : runtime.remoteNames)
+        // A finished job keeps its files for the results window (and a retry); an unfinished zip
+        // upload builds its zip, its one file, again.
+        let ended = SavedJob.Ended(state)
+        return SavedJob(deviceID: deviceID, deviceName: deviceName, route: route, policy: policy,
+                        downloadPlan: downloadPlan, uploadPlan: uploadPlan,
+                        items: packAsZip && ended == nil ? [] : items, packAsZip: packAsZip, choices: choices,
+                        remoteNames: items.isEmpty || runtime.remoteNames.isEmpty ? nil : runtime.remoteNames,
+                        id: id, startedAt: startedAt, finishedAt: finishedAt, ended: ended, note: note)
     }
 
     /// Download convenience (Finder drops, the Download button).
@@ -211,15 +263,35 @@ final class TransferJob: Identifiable {
         return names.count == 1 ? first : String(localized: "\(first) and \(names.count - 1) more")
     }
 
-    /// "Galaxy → ~/Downloads" or "~/Desktop → Galaxy:/sdcard/DCIM".
-    var routeDescription: String {
+    /// What the job does, for its details window: "Download", "Upload", "Copy" or "Move".
+    var kindTitle: String {
         switch route {
-        case .download(_, let to): "\(deviceName) → \(to.abbreviatingWithTildeInPath)"
-        case .upload(let sources, let to):
-            "\(sources.first?.deletingLastPathComponent().abbreviatingWithTildeInPath ?? "") → \(deviceName):\(to.path)"
-        case .deviceCopy(let sources, _, let fromName, let to, let move):
-            "\(fromName):\(sources.first?.ref.parentPath ?? "") \(move ? "⇢" : "→") \(deviceName):\(to.path)"
+        case .download: String(localized: "Download")
+        case .upload: String(localized: "Upload")
+        case .deviceCopy(_, _, _, _, let move): move ? String(localized: "Move") : String(localized: "Copy")
         }
+    }
+
+    /// The folder the files came from: "Galaxy:/sdcard/DCIM" or "~/Desktop".
+    var sourceLocation: String {
+        switch route {
+        case .download(let sources, _): "\(deviceName):\(sources.first?.ref.parentPath ?? "/")"
+        case .upload(let sources, _): sources.first?.deletingLastPathComponent().abbreviatingWithTildeInPath ?? ""
+        case .deviceCopy(let sources, _, let fromName, _, _): "\(fromName):\(sources.first?.ref.parentPath ?? "/")"
+        }
+    }
+
+    /// The folder they go to: "~/Downloads" or "Galaxy:/sdcard/DCIM".
+    var destinationLocation: String {
+        switch route {
+        case .download(_, let to): to.abbreviatingWithTildeInPath
+        case .upload(_, let to), .deviceCopy(_, _, _, let to, _): "\(deviceName):\(to.path)"
+        }
+    }
+
+    /// "Galaxy:/sdcard/DCIM → ~/Downloads" or "~/Desktop → Galaxy:/sdcard/DCIM".
+    var routeDescription: String {
+        "\(sourceLocation) \(route.isMove ? "⇢" : "→") \(destinationLocation)"
     }
 
     /// The Mac folder to reveal when done (downloads).
@@ -284,6 +356,8 @@ struct ItemCounts: Equatable {
     var transferBytes: UInt64 = 0
     /// Size of the files done.
     var doneBytes: UInt64 = 0
+    /// Files already there that only got the incoming file's date.
+    var datesSet = 0
     /// Files waiting for the user's decision.
     var asking = 0
 
@@ -300,6 +374,8 @@ struct ItemCounts: Equatable {
         let one = adding ? 1 : -1, bytes = item.size ?? 0
         func change(_ total: inout UInt64) { total = adding ? total + bytes : total - bytes }
         switch item.state {
+        case .done where item.decision == .setDate:
+            datesSet += one
         case .done:
             done += one
             change(&doneBytes)
