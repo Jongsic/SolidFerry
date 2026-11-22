@@ -88,6 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor func applicationDidFinishLaunching(_ notification: Notification) {
         // Files opened in other apps last time, if it didn't quit normally.
         FileOpening.removeAll()
+        PopoverResizing.install()
     }
 
     @MainActor func applicationWillTerminate(_ notification: Notification) {

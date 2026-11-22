@@ -170,6 +170,8 @@ struct FileComparisonPanel: View {
     var datesApply = false
     /// Reads the selection and the destination again (the list's refresh button).
     var refresh: (() -> Void)?
+    /// Why the list couldn't be made: shown in its place, with a way to try again.
+    var failure: String?
     @State private var filter = FileFilter.all
 
     private var compared: TransferPolicy { comparedAs ?? policy }
@@ -177,7 +179,7 @@ struct FileComparisonPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             PolicyBar(policy: $policy, hashAvailable: hashAvailable, uploadDates: uploadDates, datesApply: datesApply)
-                .disabled(previewing && summary == nil)
+                .disabled(previewing && summary == nil && failure == nil)
             Divider()
             // The list is always there and takes the room the window has; before the preview
             // it's empty, with the button that fills it in the middle. Filling it doesn't
@@ -205,12 +207,24 @@ struct FileComparisonPanel: View {
     }
 
     @ViewBuilder private var files: some View {
-        FilterBar(summary: previewing ? summary : nil, previewing: previewing,
+        FilterBar(summary: previewing ? summary : nil, previewing: previewing && failure == nil,
                   hashMode: policy.existing == .ifHashDiffers, filter: $filter, refresh: refresh)
         ZStack {
             FileTable(rows: previewing ? visibleRows : [], policy: compared, choices: $choices, moving: moving)
             if !previewing {
                 PreviewButton { previewing = true }
+            } else if let failure {
+                VStack(spacing: 10) {
+                    Label(failure, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let refresh {
+                        Button("Try Again", action: refresh)
+                    }
+                }
+                .frame(maxWidth: 420)
+                .padding()
             } else if rows == nil {
                 VStack(spacing: 8) {
                     ProgressView()

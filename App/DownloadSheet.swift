@@ -58,15 +58,11 @@ struct DownloadSheet: View {
                 }
             }
 
-            if let scanError {
-                Text(scanError).foregroundStyle(.red)
-            }
-
             Divider()
 
             FileComparisonPanel(policy: $policy, choices: $choices, previewing: $previewing, rows: rows, summary: summary,
                                 progress: compared, hashAvailable: request.fileSystem.capabilities.deviceHashing,
-                                datesApply: true, refresh: refresh)
+                                datesApply: true, refresh: refresh, failure: scanError)
                 .onAppear { policy = policy.normalized(hashAvailable: request.fileSystem.capabilities.deviceHashing, toMac: true) }
 
             Divider()
@@ -111,7 +107,7 @@ struct DownloadSheet: View {
     /// "12 files · 2.3 GB", or the scan's progress; before a preview, what was selected.
     private var planDetail: String? {
         if let plan { return String(localized: "\(plan.files.count) files · \(ByteFormat.string(plan.totalBytes))") }
-        guard previewing else { return String(localized: "\(request.entries.count) items") }
+        guard previewing, scanError == nil else { return String(localized: "\(request.entries.count) items") }
         return scanned > 0 ? String(localized: "Scanning… \(scanned)") : nil
     }
 

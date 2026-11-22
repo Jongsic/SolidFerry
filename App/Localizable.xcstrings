@@ -5925,6 +5925,16 @@
           }
         }
       }
+    },
+    "The device didn’t give the whole list. Reconnect the device and try again.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "기기가 목록을 다 주지 않았습니다. 기기를 다시 연결한 뒤 다시 시도하세요."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

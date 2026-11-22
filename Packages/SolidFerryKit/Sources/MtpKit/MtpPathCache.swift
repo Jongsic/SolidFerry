@@ -58,6 +58,11 @@ final class MtpPathCache: @unchecked Sendable {
         }
     }
 
+    /// Drops every handle learned so far (the phone's session started over).
+    func forgetAll() {
+        lock.withLock { children.removeAll() }
+    }
+
     /// Drops `path` and, if it's a folder, everything under it.
     func forget(_ path: String) {
         let (folder, name) = Self.split(path)

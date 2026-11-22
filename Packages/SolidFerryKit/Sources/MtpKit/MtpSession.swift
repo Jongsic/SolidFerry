@@ -15,6 +15,10 @@ public enum MtpError: Error, CustomStringConvertible, LocalizedError {
     case protocolViolation(String)
     case response(op: UInt16, code: UInt16)
     case cancelled
+    /// A folder's listing in bulk left out the kind or size of some of its items, which this
+    /// phone otherwise gives (seen right after taking it over from macOS's photo service,
+    /// QUIRKS G12). Reconnecting it helps.
+    case incompleteListing(missing: Int)
 
     public var description: String {
         switch self {
@@ -24,6 +28,7 @@ public enum MtpError: Error, CustomStringConvertible, LocalizedError {
         case .protocolViolation(let message): "protocol: \(message)"
         case .response(let op, let code): String(format: "op 0x%04X failed: 0x%04X", op, code)
         case .cancelled: "cancelled"
+        case .incompleteListing(let missing): "bulk listing left out \(missing) items"
         }
     }
 }
@@ -63,6 +68,9 @@ public final class MtpSession {
     private let lock = NSLock()
     private var cancelRequested = false
     private var abandoned = false
+    /// Called on the session's thread after the phone dropped the session and it was opened
+    /// again: handles from before may no longer be valid.
+    public var onReopen: (() -> Void)?
 
     /// Opens the MTP interface of the USB device with this serial. If macOS's ptpcamerad
     /// holds it, it's killed and the interface taken before its relaunch does (QUIRKS H2).
@@ -216,6 +224,7 @@ public final class MtpSession {
             // macOS's photo service, QUIRKS G4). Open it again and retry once; nothing was transferred.
             mtpLog.notice("session was closed by the phone; reopening")
             try openSession()
+            onReopen?()
             return try transactOnce(op, params, timeout: timeout, dataSink: dataSink)
         }
     }

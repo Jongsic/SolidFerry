@@ -73,16 +73,12 @@ struct DeviceCopySheet: View {
                 source: .device(request.items.first?.deviceID ?? "", request.items.first?.deviceName ?? "",
                                 paths: request.items.map(\.path), title: selectionTitle),
                 sourceDetail: plan.map { String(localized: "\($0.files.count) files · \(ByteFormat.string($0.totalBytes))") }
-                    ?? (previewing ? nil : String(localized: "\(request.items.count) items")),
+                    ?? (previewing && scanError == nil ? nil : String(localized: "\(request.items.count) items")),
                 destination: .deviceFolder(request.destinationDeviceID, request.destinationDeviceName, request.destination)
             ) { EmptyView() }
             if !request.sameDevice {
                 Text("Files go through this Mac one at a time and aren’t kept on it.")
                     .appFont(.caption).foregroundStyle(.secondary)
-            }
-
-            if let scanError {
-                Text(scanError).foregroundStyle(.red)
             }
 
             Divider()
@@ -91,7 +87,7 @@ struct DeviceCopySheet: View {
             FileComparisonPanel(policy: $policy, choices: $choices, previewing: $previewing, rows: rows, summary: summary,
                                 progress: compared,
                                 hashAvailable: false, uploadDates: uploadDates, comparedAs: comparedPolicy,
-                                moving: move, refresh: refresh)
+                                moving: move, refresh: refresh, failure: scanError)
                 .onAppear { policy = policy.normalized(hashAvailable: false) }
 
             Divider()

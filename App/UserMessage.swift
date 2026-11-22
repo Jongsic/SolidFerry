@@ -41,6 +41,8 @@ enum UserMessage {
             switch mtp {
             case .response(_, let code) where code == PTPResponse.invalidObjectHandle:
                 return String(localized: "The file changed on the device. Reload and try again.")
+            case .incompleteListing:
+                return String(localized: "The device didn’t give the whole list. Reconnect the device and try again.")
             case .response(_, let code) where code == PTPResponse.storeFull:
                 return String(localized: "The device’s storage is full.")
             case .response(_, let code) where code == PTPResponse.accessDenied || code == PTPResponse.objectWriteProtected:

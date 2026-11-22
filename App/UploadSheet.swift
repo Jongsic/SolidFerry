@@ -58,7 +58,8 @@ struct UploadSheet: View {
                 destination: .deviceFolder(request.deviceID, request.deviceName, request.destination)
             ) { EmptyView() }
 
-            if let scanError {
+            // Shown in the list's place while it's up.
+            if let scanError, !previewing || sendsZip {
                 Text(scanError).foregroundStyle(.red)
             }
 
@@ -81,7 +82,7 @@ struct UploadSheet: View {
                 FileComparisonPanel(policy: $policy, choices: $choices, previewing: $previewing, rows: rows, summary: summary,
                                     progress: compared,
                                     hashAvailable: request.fileSystem.capabilities.deviceHashing, uploadDates: uploadDates,
-                                    comparedAs: comparedPolicy, refresh: refresh)
+                                    comparedAs: comparedPolicy, refresh: refresh, failure: scanError)
                     .onAppear { policy = policy.normalized(hashAvailable: request.fileSystem.capabilities.deviceHashing) }
             }
 

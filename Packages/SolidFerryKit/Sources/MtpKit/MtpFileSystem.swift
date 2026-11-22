@@ -171,7 +171,11 @@ public final class MtpFileSystem: DeviceFileSystem, @unchecked Sendable {
                 worker.close()
                 throw info.samsungDeviceStatus == 4 ? MtpConnectError.chargingOnly : MtpConnectError.noStorage
             }
-            return MtpFileSystem(serial: serial, info: info, storages: storages, worker: worker, evicted: session.wasEvicted)
+            let fs = MtpFileSystem(serial: serial, info: info, storages: storages, worker: worker, evicted: session.wasEvicted)
+            // Handles learned before the phone dropped the session aren't used after it.
+            let paths = fs.paths
+            try await worker.run(.interactive) { session in session.onReopen = { paths.forgetAll() } }
+            return fs
         } catch let error as MtpConnectError {
             throw error
         } catch {
@@ -209,10 +213,19 @@ public final class MtpFileSystem: DeviceFileSystem, @unchecked Sendable {
     /// 4 GB or more (QUIRKS M3), so those are asked again. Every path that turns ObjectInfo
     /// into an entry goes through here: a file believed to be 4 GB − 1 would be downloaded
     /// cut short, and reported as complete.
-    private static func infoIfExists(_ session: MtpSession, _ handle: UInt32) throws -> MtpObjectInfo? {
+    /// With `skippingUnsized`, an item whose full size the phone won't then give is left out
+    /// like one that's gone (for items a listing in bulk left out, QUIRKS G12).
+    private static func infoIfExists(_ session: MtpSession, _ handle: UInt32, skippingUnsized: Bool = false) throws -> MtpObjectInfo? {
         do {
             var info = try session.objectInfo(handle)
-            if !info.isFolder, info.size == UInt64(UInt32.max) { info.size = try session.objectSize64(handle) }
+            if !info.isFolder, info.size == UInt64(UInt32.max) {
+                do {
+                    info.size = try session.objectSize64(handle)
+                } catch let MtpError.response(_, code) where skippingUnsized {
+                    mtpLog.notice("skipped an item whose size the phone didn't give (\(String(format: "0x%04X", code), privacy: .public))")
+                    return nil
+                }
+            }
             return info
         } catch MtpError.response(_, PTPResponse.invalidObjectHandle) {
             mtpLog.notice("skipped an item that no longer exists")
@@ -245,6 +258,10 @@ public final class MtpFileSystem: DeviceFileSystem, @unchecked Sendable {
     /// A listing by name with every size and date filled in: two bulk requests for the folder.
     private func withDetails(_ names: [RemoteEntry], of folder: UInt32, token: CancelToken?) async throws -> [RemoteEntry] {
         let (sizes, dates) = try await bulkDetails(of: folder, token: token)
+        // Every file's size comes in the one reply; files left out of it mean the phone isn't
+        // answering properly (QUIRKS G12), not files without a size.
+        let unsized = names.filter { !$0.isDirectory && sizes[$0.ref.handle.map { UInt32($0) } ?? 0] == nil }.count
+        if unsized > 0 { throw MtpError.incompleteListing(missing: unsized) }
         return names.map { entry in
             let handle = entry.ref.handle.map { UInt32($0) } ?? 0
             return RemoteEntry(ref: entry.ref, name: entry.name, kind: entry.kind,
@@ -331,6 +348,11 @@ public final class MtpFileSystem: DeviceFileSystem, @unchecked Sendable {
             let formats = Dictionary(
                 try session.objectPropList(children: handle, property: UInt32(MTPProp.objectFormat)).map { ($0.handle, $0.format) },
                 uniquingKeysWith: { a, _ in a })
+            // Every item's kind comes in the one reply; without it a folder would pass for a
+            // file. Items left out (or format 0, which isn't one) mean the phone isn't answering
+            // properly (QUIRKS G12); asking each one instead would be slow and hide that.
+            let unknownKind = names.filter { (formats[$0.handle] ?? 0) == 0 }.count
+            if unknownKind > 0 { throw MtpError.incompleteListing(missing: unknownKind) }
             // Cross-check against the handle list; fetch anything the bulk reply left out.
             let all = try session.objectHandles(storage: storage, parent: handle)
             let listed = Set(names.map(\.handle))
@@ -341,7 +363,7 @@ public final class MtpFileSystem: DeviceFileSystem, @unchecked Sendable {
                 return item
             }
             for missing in all where !listed.contains(missing) {
-                if let info = try Self.infoIfExists(session, missing) { result.append(info) }
+                if let info = try Self.infoIfExists(session, missing, skippingUnsized: true) { result.append(info) }
             }
             // A work file's name decides that tidying deletes it, and the bulk list can hold a
             // user's file under the name it had before a rename (QUIRKS G11): those are asked
