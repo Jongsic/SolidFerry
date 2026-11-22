@@ -893,8 +893,12 @@ final class TransferQueue {
         if job.route.isDownload {
             let urls = written.map { job.items[$0].destination.localURL }
             let stamps = await Task.detached {
-                urls.map { url in
-                    DiskWait.during { (try? url?.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])).map { ($0.fileSize.map(UInt64.init), $0.contentModificationDate) } }
+                urls.map { url -> (UInt64?, Date?)? in
+                    // The URL keeps the values read when the job was planned (what was there
+                    // before); read the file as it is now.
+                    guard var url else { return nil }
+                    url.removeAllCachedResourceValues()
+                    return DiskWait.during { (try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])).map { ($0.fileSize.map(UInt64.init), $0.contentModificationDate) } }
                 }
             }.value
             for (i, stamp) in zip(written, stamps) {
