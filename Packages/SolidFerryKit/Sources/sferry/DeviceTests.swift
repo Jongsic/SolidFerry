@@ -94,6 +94,20 @@ struct DeviceTestSuite: DeviceTestHelpers {
                 let probes = try await listing(remote, on: fs).keys.filter { $0.contains("dateprobe") }
                 try Self.check(probes.isEmpty, "probe file left: \(probes)")
             }),
+            ("folder dates: a folder with a file in it takes the date it's given, where the connection can", {
+                let dir = remote.appending("dated folder")
+                try await fs.makeDirectory(dir)
+                try await fs.upload(try makeLocal("in-dated.bin", size: 10), to: dir.appending("in-dated.bin"), modified: nil) { _ in }
+                guard fs.capabilities.setsFolderDates else {
+                    print("    (this connection can't date folders)")
+                    return
+                }
+                let date = Date(timeIntervalSince1970: 1_500_000_000)
+                try await fs.setFolderDates([dir.path: date])
+                let entry = try await listing(remote, on: fs)["dated folder"]
+                let delta = abs((entry?.modified ?? .distantPast).timeIntervalSince(date))
+                try Self.check(delta <= ExistingItem.dateTolerance, "folder date off by \(Int(delta)) s")
+            }),
             ("transfer: exact bytes at packet and chunk boundaries", {
                 // 512/1024: USB packet sizes; 8 MB: download chunk; 1 MB: upload chunk.
                 for size in [0, 1, 511, 512, 513, 1023, 1024, 1_048_564, 1_048_576, 8_388_096, 8_388_608, 8_388_609] {

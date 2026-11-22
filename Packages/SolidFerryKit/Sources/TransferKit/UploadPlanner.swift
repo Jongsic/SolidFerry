@@ -22,6 +22,9 @@ public struct UploadPlan: Sendable, Codable {
     public var files: [LocalFile] = []
     /// Folders to create on the device (also empty ones), parents first.
     public var directories: [String] = []
+    /// The folders' dates on this Mac, by the same paths (nil in a plan saved before they were
+    /// kept).
+    public var directoryDates: [String: Date]?
     public var totalBytes: UInt64 = 0
 
     public init() {}
@@ -34,6 +37,9 @@ public struct UploadPlan: Sendable, Codable {
         guard !renames.isEmpty else { return self }
         var copy = self
         copy.directories = directories.map { remappingTop($0, renames) }
+        copy.directoryDates = directoryDates.map { dates in
+            Dictionary(dates.map { (remappingTop($0.key, renames), $0.value) }, uniquingKeysWith: { a, _ in a })
+        }
         copy.files = files.map { LocalFile(url: $0.url, relativePath: remappingTop($0.relativePath, renames), size: $0.size, modified: $0.modified) }
         return copy
     }
@@ -45,12 +51,14 @@ public enum UploadPlanner {
     /// `stop` is asked for every item and ends the walk with `CancellationError`.
     public static func expand(_ urls: [URL], stop: () -> Bool = { false }) throws -> UploadPlan {
         var plan = UploadPlan()
+        plan.directoryDates = [:]
         let keys: [URLResourceKey] = [.isDirectoryKey, .isRegularFileKey, .fileSizeKey, .contentModificationDateKey]
         func add(_ url: URL, relative: String) throws {
             if stop() { throw CancellationError() }
             let values = try url.resourceValues(forKeys: Set(keys))
             if values.isDirectory == true {
                 plan.directories.append(relative)
+                plan.directoryDates?[relative] = values.contentModificationDate
                 let children = try FileManager.default.contentsOfDirectory(
                     at: url, includingPropertiesForKeys: keys, options: [])
                 for child in children.sorted(by: { $0.lastPathComponent < $1.lastPathComponent })

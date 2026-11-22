@@ -303,6 +303,7 @@ final class TransferQueue {
             job.state = .running
             try await transferFiles(job, fs: fs)
             try checkStop()
+            await dateFolders(job, fs: fs)
             await recordResults(job, fs: fs)
             if !fs.capabilities.keepsUploadDates {
                 // Seen on a file sent through this connection; for next time. ("Kept" is only
@@ -576,16 +577,40 @@ final class TransferQueue {
         case .upload where job.packAsZip:
             break // the folders are inside the zip
         case .upload(_, let destination):
-            try await makeMissing((job.uploadPlan?.directories ?? []).map { destination.appending($0) }, job: job, fs: fs)
+            let dirs = job.uploadPlan?.directories ?? []
+            let made = Set(try await makeMissing(dirs.map { destination.appending($0) }, job: job, fs: fs).map(\.path))
+            // The folders made here take the date they have on this Mac (folders already there
+            // keep theirs), once their files are in.
+            guard fs.capabilities.setsFolderDates, let dates = job.uploadPlan?.directoryDates else { return }
+            for dir in dirs {
+                let path = destination.appending(dir).path
+                if made.contains(path), let date = dates[dir] { job.runtime.foldersToDate[path] = date }
+            }
         }
     }
 
     /// Makes the job's folders on the phone that planning didn't see there, all at once.
-    private func makeMissing(_ refs: [RemoteRef], job: TransferJob, fs: any DeviceFileSystem) async throws {
+    @discardableResult
+    private func makeMissing(_ refs: [RemoteRef], job: TransferJob, fs: any DeviceFileSystem) async throws -> [RemoteRef] {
         let missing = refs.filter { job.runtime.remoteNames[$0.parentPath ?? ""]?.contains($0.name) != true }
-        guard !missing.isEmpty else { return }
+        guard !missing.isEmpty else { return [] }
         try await fs.makeDirectories(missing)
         for ref in missing { job.runtime.remoteNames[ref.parentPath ?? "", default: FolderNames()].insert(ref.name) }
+        return missing
+    }
+
+    /// Dates the folders the job made, now that nothing more goes into them (a file arriving
+    /// would change a folder's date again). If the phone refuses, they keep the date they were
+    /// made; the files are what the job was for.
+    private func dateFolders(_ job: TransferJob, fs: any DeviceFileSystem) async {
+        let dates = job.runtime.foldersToDate
+        guard !dates.isEmpty else { return }
+        do {
+            try await fs.setFolderDates(dates)
+        } catch {
+            transferLog.error("folder dates not set: \(String(describing: error), privacy: .public)")
+        }
+        job.runtime.foldersToDate = [:]
     }
 
     // MARK: Phones that don't keep upload dates

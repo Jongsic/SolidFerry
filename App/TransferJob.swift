@@ -230,6 +230,7 @@ final class TransferJob: Identifiable {
         }
         counts = ItemCounts(items)
         runtime.remoteNames = saved.remoteNames ?? [:]
+        runtime.foldersToDate = saved.foldersToDate ?? [:]
         doneBytes = counts.doneBytes
         state = saved.ended?.state ?? .paused
     }
@@ -242,6 +243,7 @@ final class TransferJob: Identifiable {
                         downloadPlan: downloadPlan, uploadPlan: uploadPlan,
                         items: packAsZip && ended == nil ? [] : items, packAsZip: packAsZip, choices: choices,
                         remoteNames: items.isEmpty || runtime.remoteNames.isEmpty ? nil : runtime.remoteNames,
+                        foldersToDate: runtime.foldersToDate.isEmpty ? nil : runtime.foldersToDate,
                         id: id, startedAt: startedAt, finishedAt: finishedAt, ended: ended, note: note)
     }
 
@@ -401,6 +403,9 @@ struct JobRuntime {
     /// Names already in each device folder written to, for "keep both" naming (saved with the
     /// job: decisions can come after a relaunch).
     var remoteNames: [String: FolderNames] = [:]
+    /// Folders the job made on the device, with the date each had on this Mac: set once the
+    /// files are in (saved with the job, since a resumed job doesn't make them again).
+    var foldersToDate: [String: Date] = [:]
     /// The zip built for a packAsZip job, removed when the job ends.
     var temporaryZip: URL?
     /// Sizes and dates the dialog looked up at the destination (`DeviceFolderPlacer.lookedUp`),

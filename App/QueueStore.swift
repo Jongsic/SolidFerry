@@ -20,6 +20,8 @@ struct SavedJob: Codable {
     /// Names in the phone folders it writes to, as planned: "keep both" names chosen after a
     /// relaunch avoid them.
     var remoteNames: [String: FolderNames]? = nil
+    /// Folders the job made on the device that still take their date (by path).
+    var foldersToDate: [String: Date]? = nil
     var id: UUID? = nil
     var startedAt: Date? = nil
     var finishedAt: Date? = nil

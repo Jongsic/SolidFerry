@@ -20,6 +20,18 @@ extension AdbFileSystem {
         }
     }
 
+    /// `touch -m -d` with the time in UTC, several folders per request (QUIRKS A20).
+    public func setFolderDates(_ dates: [String: Date]) async throws {
+        let commands = dates.sorted { $0.key < $1.key }.map { path, date in
+            "touch -m -d \(date.formatted(.iso8601)) -- \(Self.shellQuote(path))"
+        }
+        for range in Self.argumentBatches(commands) {
+            // Every folder is tried; what any of them printed is the failure.
+            let printed = try await run(commands[range].joined(separator: "; "))
+            if !printed.isEmpty { throw AdbError.commandFailed(printed) }
+        }
+    }
+
     public func rename(_ ref: RemoteRef, to newName: String) async throws -> RemoteRef {
         guard FileNames.isAllowed(newName) else { throw DeviceFSError.invalidName(newName) }
         guard let parent = ref.parentPath else { throw DeviceFSError.invalidName(newName) }

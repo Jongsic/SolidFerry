@@ -22,11 +22,14 @@ public struct FSCapabilities: Sendable, Hashable {
     /// Any part of a file can be read (`read(_:range:chunk:)`), for playing media while it's
     /// read.
     public var readsRanges: Bool
+    /// Folders can be given a date (`setFolderDates`): folders sent from this Mac keep theirs.
+    public var setsFolderDates: Bool
 
     public init(fastListing: Bool, parallelTransfers: Bool, deviceHashing: Bool,
                 exactLargeSizes: Bool = true, keepsUploadDates: Bool = true, streamsFiles: Bool = false,
-                readsRanges: Bool = false) {
+                readsRanges: Bool = false, setsFolderDates: Bool = false) {
         self.keepsUploadDates = keepsUploadDates
+        self.setsFolderDates = setsFolderDates
         self.streamsFiles = streamsFiles
         self.readsRanges = readsRanges
         self.fastListing = fastListing
@@ -83,6 +86,10 @@ public protocol DeviceFileSystem: AnyObject, Sendable {
     func listTree(_ roots: [RemoteRef]) -> AsyncThrowingStream<(RemoteRef, [RemoteEntry]), Error>
 
     func makeDirectory(_ ref: RemoteRef) async throws
+    /// Gives folders a modification date (by path), where `capabilities.setsFolderDates`. A
+    /// folder's date changes again when something is added to or removed from it, so it's
+    /// set once its files are in.
+    func setFolderDates(_ dates: [String: Date]) async throws
 
     /// Renames within the same folder. Fails if `newName` is taken (never overwrites).
     func rename(_ ref: RemoteRef, to newName: String) async throws -> RemoteRef
@@ -197,6 +204,10 @@ public enum DeviceFSError: Error, Sendable {
 
 extension DeviceFileSystem {
     public func prioritizeDetails(_ refs: [RemoteRef]) {}
+
+    public func setFolderDates(_ dates: [String: Date]) async throws {
+        throw DeviceFSError.unsupported
+    }
 
     /// Default: no bundling.
     public func downloadBundled(_ items: [DownloadItem],
