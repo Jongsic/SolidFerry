@@ -5,7 +5,7 @@
 #
 # Usage: scripts/build-dmg.sh [version]
 #   version   e.g. v0.2.0 — sets the app's version and names the DMG
-#             (default: `git describe`, e.g. v1.0.0 or abc1234-dirty)
+#             (default: `git describe`, e.g. v1.2.0 or abc1234-dirty)
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
