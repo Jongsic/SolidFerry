@@ -49,7 +49,7 @@ enum UserMessage {
                 return String(localized: "The device doesn’t allow changing that.")
             default:
                 // Codes mean nothing to people; keep them for the log.
-                errorLog.error("unrecognized MTP error: \(mtp.description, privacy: .public)")
+                log("unrecognized MTP error: \(mtp.description)")
                 return String(localized: "The device couldn’t do that. Try again, or reconnect the device.")
             }
         }
@@ -60,19 +60,19 @@ enum UserMessage {
         case .adbNotFound:
             return String(localized: "adb wasn’t found. Install Android platform-tools.")
         case .io(let reason):
-            errorLog.error("adb io: \(reason, privacy: .public)")
+            log("adb io: \(reason)")
             return String(localized: "The connection was interrupted. Try again, or reconnect the device.")
         case .protocolViolation:
             return String(localized: "The device sent an unexpected response.")
         case .failed(let message):
-            errorLog.error("adb: \(message, privacy: .public)")
+            log("adb: \(message)")
             if message.contains("offline") || message.contains("not found") {
                 return String(localized: "The connection to the device was lost. Reconnect it.")
             }
             return String(localized: "The device couldn’t do that. Try again, or reconnect the device.")
         case .commandFailed(let output):
             // The shell's own words mean little to people; the ones that say what to do are told.
-            errorLog.error("adb command: \(output, privacy: .public)")
+            log("adb command: \(output)")
             if output.contains("No space left") { return String(localized: "The device’s storage is full.") }
             if output.contains("Read-only") || output.contains("Permission denied") {
                 return String(localized: "The device doesn’t allow changing that.")
@@ -87,7 +87,7 @@ enum UserMessage {
             case 2: return String(localized: "\(path) doesn’t exist.")
             case 13: return String(localized: "No permission to open \(path).")
             default:
-                errorLog.error("adb remote error \(errno, privacy: .public) for \(path, privacy: .public)")
+                log("adb remote error \(errno)") // not the path: it can carry the user's file names
                 return String(localized: "Couldn’t open \(path).")
             }
         }
@@ -101,7 +101,19 @@ enum UserMessage {
         if [NSCocoaErrorDomain, NSPOSIXErrorDomain, NSURLErrorDomain, NSOSStatusErrorDomain].contains(domain) {
             return error.localizedDescription
         }
-        errorLog.error("undescribed error: \(String(describing: error), privacy: .public)")
+        log("undescribed error: \(String(describing: error))")
         return String(localized: "Something went wrong. Try again, or reconnect the device.")
     }
+
+    /// What a message leaves out, for the log. A message on screen is worked out again each time
+    /// it's drawn, so the same line in a row is logged once.
+    private static func log(_ line: String) {
+        let repeated = lastLogged.withLock { last in
+            defer { last = line }
+            return last == line
+        }
+        if !repeated { errorLog.error("\(line, privacy: .public)") }
+    }
+
+    private static let lastLogged = OSAllocatedUnfairLock<String?>(initialState: nil)
 }

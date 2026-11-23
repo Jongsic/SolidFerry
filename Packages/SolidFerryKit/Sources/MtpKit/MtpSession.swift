@@ -162,7 +162,7 @@ public final class MtpSession {
                     self?.read()
                 }
             } catch {
-                mtpLog.notice("event pipe not readable: \(error)")
+                mtpLog.notice("event pipe not readable: \(String(describing: error), privacy: .public)")
             }
         }
     }

@@ -40,7 +40,7 @@ public final class AdbFileSystem: DeviceFileSystem {
             exactLargeSizes: lsV2, // v1 listings carry 32-bit sizes (QUIRKS A2)
             streamsFiles: true,
             readsRanges: readsRanges,
-            setsFolderDates: true // with the shell's touch (QUIRKS A20)
+            setsFolderDates: true // with the shell's touch (QUIRKS A21)
         )
     }
 

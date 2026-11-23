@@ -329,10 +329,10 @@ final class BrowserModel {
         isLoading = true
         loadedCount = 0
         loadStarted = Date()
-        listingLog.notice("load requested")
+        listingLog.debug("load requested")
         listTask = Task {
             let start = ContinuousClock.now
-            listingLog.notice("load task started")
+            listingLog.debug("load task started")
             var received: [RemoteEntry] = []
             var index: [String: Int] = [:]
             var partialCount = 0
@@ -347,7 +347,7 @@ final class BrowserModel {
                 for try await batch in fs.list(ref) {
                     guard isCurrent() else { return }
                     let batchStart = ContinuousClock.now
-                    if !firstShown { listingLog.notice("first batch received after \(ms(batchStart - start), privacy: .public)") }
+                    if !firstShown { listingLog.debug("first batch received after \(ms(batchStart - start), privacy: .public)") }
                     defer { mainThreadTime += ContinuousClock.now - batchStart }
                     var added = false
                     var updated: [RemoteEntry] = []
@@ -382,7 +382,7 @@ final class BrowserModel {
                         applyPendingSelection()
                         if !firstShown {
                             firstShown = true
-                            listingLog.notice("first rows on screen: \(received.count) after \(ms(ContinuousClock.now - start), privacy: .public) (this batch took \(ms(ContinuousClock.now - batchStart), privacy: .public) on main)")
+                            listingLog.debug("first rows on screen: \(received.count) after \(ms(ContinuousClock.now - start), privacy: .public) (this batch took \(ms(ContinuousClock.now - batchStart), privacy: .public) on main)")
                         }
                     }
                 }

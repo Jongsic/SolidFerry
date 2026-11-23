@@ -200,6 +200,9 @@ struct FileTableView: NSViewRepresentable {
         private var headerTextSize: Double = 0
         private var locationKey: String?
         private var applyingState = false
+        /// The window's selection as of the last time the list and the window agreed: a
+        /// window selection that differs from it was changed by the window, and is shown.
+        private var syncedSelection = Set<String>()
         /// Rows dragged to Finder whose promises are still arriving (FileTableView+Drop).
         var pendingDrop: PendingDrop?
 
@@ -219,10 +222,19 @@ struct FileTableView: NSViewRepresentable {
                 table.sortDescriptors = [descriptor]
             }
 
+            // The selection the list shows: the window's when the window changed it; otherwise
+            // the list's own, which can be ahead of the window's while a click is still under
+            // way (⌘-click). Rows not in the list keep the window's.
+            var selection: Set<String>?
+            if parent.selection != syncedSelection {
+                selection = parent.selection
+            }
+
             if table.isEnabled != parent.enabled {
                 table.isEnabled = parent.enabled
                 table.alphaValue = parent.enabled ? 1 : 0.35
                 if !parent.enabled { table.deselectAll(nil) }
+                selection = parent.selection
             }
 
             if parent.textSize != textSize {
@@ -249,19 +261,27 @@ struct FileTableView: NSViewRepresentable {
                 }
             }
 
-            let entriesChanged = parent.entries != entries
-            if entriesChanged || parent.sizeDisplay != sizeDisplay {
-                let sameRows = parent.entries.map(\.id) == entries.map(\.id)
+            let sizeDisplayChanged = parent.sizeDisplay != sizeDisplay
+            if parent.entries != entries || sizeDisplayChanged {
+                let old = entries
                 entries = parent.entries
                 sizeDisplay = parent.sizeDisplay
-                if sameRows, table.numberOfRows == entries.count {
-                    // Same rows, new details (sizes/dates arriving): refresh in place so the
-                    // selection, scroll position and an in-progress rename aren't disturbed.
+                if old.map(\.id) == entries.map(\.id), table.numberOfRows == entries.count {
+                    // Same rows, new details (sizes/dates arriving): refresh only the rows that
+                    // changed, in place, so the selection, scroll position and an in-progress
+                    // rename aren't disturbed.
+                    let rows = sizeDisplayChanged
+                        ? IndexSet(integersIn: 0..<entries.count)
+                        : IndexSet(entries.indices.filter { entries[$0] != old[$0] })
                     let columns = IndexSet(table.tableColumns.indices.filter {
                         table.tableColumns[$0].identifier != Column.name.identifier
                     })
-                    table.reloadData(forRowIndexes: IndexSet(integersIn: 0..<entries.count), columnIndexes: columns)
+                    if !rows.isEmpty { table.reloadData(forRowIndexes: rows, columnIndexes: columns) }
                 } else {
+                    if selection == nil {
+                        let shown = Set(table.selectedRowIndexes.compactMap { $0 < old.count ? old[$0].id : nil })
+                        selection = shown.union(parent.selection.subtracting(old.map(\.id)))
+                    }
                     table.reloadData()
                     lastVisible = nil
                 }
@@ -273,10 +293,13 @@ struct FileTableView: NSViewRepresentable {
                 table.scrollRowToVisible(0)
             }
 
-            let wanted = IndexSet(entries.indices.filter { parent.selection.contains(entries[$0].id) })
-            if wanted != table.selectedRowIndexes {
-                table.selectRowIndexes(wanted, byExtendingSelection: false)
-                if let first = wanted.first { table.scrollRowToVisible(first) }
+            if let selection {
+                syncedSelection = parent.selection
+                let wanted = IndexSet(entries.indices.filter { selection.contains(entries[$0].id) })
+                if wanted != table.selectedRowIndexes {
+                    table.selectRowIndexes(wanted, byExtendingSelection: false)
+                    if let first = wanted.first { table.scrollRowToVisible(first) }
+                }
             }
 
             if let id = parent.renamingID, let row = entries.firstIndex(where: { $0.id == id }) {
@@ -347,6 +370,7 @@ struct FileTableView: NSViewRepresentable {
         func tableViewSelectionDidChange(_ notification: Notification) {
             guard !applyingState, let table else { return }
             let ids = Set(table.selectedRowIndexes.compactMap { $0 < entries.count ? entries[$0].id : nil })
+            syncedSelection = ids
             if ids != parent.selection { parent.selection = ids }
         }
 

@@ -121,14 +121,14 @@ final class MtpWorker: @unchecked Sendable {
             // Browsing that had to queue behind other work is what makes the list feel slow.
             let waited = ContinuousClock.now - job.enqueued
             if job.priority == .interactive, waited > .milliseconds(200) {
-                mtpLog.notice("interactive request waited \(waited.formatted(.units(allowed: [.milliseconds])), privacy: .public) in queue")
+                mtpLog.debug("interactive request waited \(waited.formatted(.units(allowed: [.milliseconds])), privacy: .public) in queue")
             }
             let started = ContinuousClock.now
             job.run(job.token?.isCancelled == true || job.call.isCancelled ? nil : session)
             condition.withLock { running = nil }
             let took = ContinuousClock.now - started
             if took > .milliseconds(500) {
-                mtpLog.notice("\(String(describing: job.priority), privacy: .public) request took \(took.formatted(.units(allowed: [.milliseconds])), privacy: .public)")
+                mtpLog.debug("\(String(describing: job.priority), privacy: .public) request took \(took.formatted(.units(allowed: [.milliseconds])), privacy: .public)")
             }
         }
         session?.closeSession()

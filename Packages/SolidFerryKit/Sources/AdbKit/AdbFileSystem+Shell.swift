@@ -20,7 +20,7 @@ extension AdbFileSystem {
         }
     }
 
-    /// `touch -m -d` with the time in UTC, several folders per request (QUIRKS A20).
+    /// `touch -m -d` with the time in UTC, several folders per request (QUIRKS A21).
     public func setFolderDates(_ dates: [String: Date]) async throws {
         let commands = dates.sorted { $0.key < $1.key }.map { path, date in
             "touch -m -d \(date.formatted(.iso8601)) -- \(Self.shellQuote(path))"
@@ -159,7 +159,8 @@ extension AdbFileSystem {
         if data.starts(with: Data(Self.lookupFailedMarker.utf8)) {
             mediaLibraryFails.withLock { $0 = true }
             let printed = String(decoding: data.dropFirst(Self.lookupFailedMarker.utf8.count), as: UTF8.self)
-            adbLog.info("\(self.serial, privacy: .public): media library lookup fails, not asked again (QUIRKS A20): \(printed)")
+            // Info isn't written to disk by default, so what it printed (it may name the file) can be shown.
+            adbLog.info("\(self.serial, privacy: .public): media library lookup fails, not asked again (QUIRKS A20): \(printed, privacy: .public)")
             return nil
         }
         return Self.isPicture(data) ? data : nil

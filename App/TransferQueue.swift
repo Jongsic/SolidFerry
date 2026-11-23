@@ -950,7 +950,9 @@ final class TransferQueue {
             try? FileManager.default.removeItem(at: zip)
             job.runtime.temporaryZip = nil
         }
-        transferLog.notice("job \(job.title, privacy: .public): \(String(describing: job.state), privacy: .public) copied \(job.counts.done) skipped \(job.counts.skipped) failed \(job.counts.failed)")
+        // No names or messages: they can carry the user's file names.
+        let outcome = if case .failed = job.state { "failed" } else { String(describing: job.state) }
+        transferLog.notice("job \(outcome, privacy: .public): copied \(job.counts.done) skipped \(job.counts.skipped) failed \(job.counts.failed)")
         let completions = job.onFinish
         job.onFinish = []
         for completion in completions { completion(error) }

@@ -90,7 +90,7 @@ make build && scripts/bigtest.sh S adb|mtp $D   # MTP: File transfer mode with t
 |---|---|---|
 | Create folder, list empty folder | A new folder shows up as a folder | |
 | Upload: size and date kept | Modification time within ±2 s, or, on phones that can't keep dates, the connection info says so | Galaxy MTP |
-| Folder dates | Where the connection can set them (ADB), a folder with a file in it takes the date it's given, within ±2 s | QUIRKS A20 |
+| Folder dates | Where the connection can set them (ADB), a folder with a file in it takes the date it's given, within ±2 s | QUIRKS A21 |
 | Boundary-size transfers | Upload and download at 0, 1, 511, 512, 513, 1023, 1024 B, around 1 MB, and around 8 MB return exactly the same bytes | USB packets (512/1024), 1 MB upload chunks, 8 MB download chunks, Samsung last-packet issue |
 | Read into memory | Parts of the files above read into memory (as the preview window does) match byte for byte; with a 1 MB limit, the 8 MB file stops partway and the connection keeps responding | Preview window (`RemoteContents`), reads stopped partway |
 | Range reads | On an 8 MB file: the first byte, ranges spanning packet and 1 MB boundaries, to the end, and the whole file are exact. After stopping a full read partway, another range is still exact | Reading while playing (MTP GetPartialObject64, ADB `dd`), reads discarded when seeking |
