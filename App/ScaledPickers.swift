@@ -8,9 +8,12 @@ import SwiftUI
 struct SegmentedChoice<Value: Hashable>: View {
     @Binding var selection: Value
     let options: [(value: Value, title: String)]
+    @Environment(\.textScale) private var textScale
 
     var body: some View {
-        SegmentedControl(selection: $selection, options: options).fixedSize()
+        SegmentedControl(selection: $selection, options: options)
+            .controlSize(swiftUIControlSize(forText: textScale.size(.body)))
+            .fixedSize()
     }
 }
 
@@ -25,13 +28,24 @@ struct MenuChoice<Value: Hashable>: View {
     let items: [Item]
     var weight: NSFont.Weight = .regular
 
+    @Environment(\.textScale) private var textScale
+
     var body: some View {
-        PopUpControl(selection: $selection, items: items, weight: weight).fixedSize()
+        PopUpControl(selection: $selection, items: items, weight: weight)
+            .controlSize(swiftUIControlSize(forText: textScale.size(.body)))
+            .fixedSize()
     }
 }
 
 /// The control size whose usual text is closest to `size`.
 private func nsControlSize(forText size: Double) -> NSControl.ControlSize {
+    if size > 17, #available(macOS 26, *) { return .extraLarge }
+    return size <= 11 ? .small : size <= 13 ? .regular : .large
+}
+
+/// The same for SwiftUI, which gives a control it places its own size: without this the
+/// controls start out at the regular size and only take theirs on the next update.
+private func swiftUIControlSize(forText size: Double) -> ControlSize {
     if size > 17, #available(macOS 26, *) { return .extraLarge }
     return size <= 11 ? .small : size <= 13 ? .regular : .large
 }
