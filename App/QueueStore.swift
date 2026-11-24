@@ -15,6 +15,8 @@ struct SavedJob: Codable {
     let items: [JobItem]
     /// Sent as one zip archive (rebuilt when resumed; the temporary zip doesn't survive).
     var packAsZip: Bool? = nil
+    /// Files it replaces on the device stay the same files (`TransferJob.keepsReplacedFiles`).
+    var keepsReplacedFiles: Bool? = nil
     /// Per-file decisions from the dialog.
     var choices: [String: ConflictChoice]? = nil
     /// Names in the phone folders it writes to, as planned: "keep both" names chosen after a

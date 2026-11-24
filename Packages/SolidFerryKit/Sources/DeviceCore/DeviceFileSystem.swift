@@ -24,12 +24,16 @@ public struct FSCapabilities: Sendable, Hashable {
     public var readsRanges: Bool
     /// Folders can be given a date (`setFolderDates`): folders sent from this Mac keep theirs.
     public var setsFolderDates: Bool
+    /// A file an upload replaces can stay the same file with new contents
+    /// (`UploadWriting.ReplacedFile.intoExisting`), keeping when it was created on the device.
+    public var keepsReplacedFiles: Bool
 
     public init(fastListing: Bool, parallelTransfers: Bool, deviceHashing: Bool,
                 exactLargeSizes: Bool = true, keepsUploadDates: Bool = true, streamsFiles: Bool = false,
-                readsRanges: Bool = false, setsFolderDates: Bool = false) {
+                readsRanges: Bool = false, setsFolderDates: Bool = false, keepsReplacedFiles: Bool = false) {
         self.keepsUploadDates = keepsUploadDates
         self.setsFolderDates = setsFolderDates
+        self.keepsReplacedFiles = keepsReplacedFiles
         self.streamsFiles = streamsFiles
         self.readsRanges = readsRanges
         self.fastListing = fastListing

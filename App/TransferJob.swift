@@ -189,15 +189,19 @@ final class TransferJob: Identifiable {
     /// Upload as one zip archive, unpacked on the phone, so file dates survive on phones that
     /// can't set them over this connection (see UploadDates and ZipWriter).
     let packAsZip: Bool
+    /// A file it replaces on the device stays the same file, keeping when it was created there
+    /// (where the connection can: `FSCapabilities.keepsReplacedFiles`).
+    let keepsReplacedFiles: Bool
     /// Shown with the finished job: what's left to do on the phone.
     var note: String?
 
     init(deviceID: String, deviceName: String, route: TransferRoute, policy: TransferPolicy,
          downloadPlan: TransferPlan? = nil, uploadPlan: UploadPlan? = nil, packAsZip: Bool = false,
-         choices: [String: ConflictChoice] = [:], lookedUp: [String: RemoteEntry] = [:],
-         completions: [(Error?) -> Void] = []) {
+         keepsReplacedFiles: Bool = false, choices: [String: ConflictChoice] = [:],
+         lookedUp: [String: RemoteEntry] = [:], completions: [(Error?) -> Void] = []) {
         id = UUID()
         self.packAsZip = packAsZip
+        self.keepsReplacedFiles = keepsReplacedFiles
         self.choices = choices
         self.onFinish = completions
         self.deviceID = deviceID
@@ -216,6 +220,7 @@ final class TransferJob: Identifiable {
         finishedAt = saved.finishedAt
         note = saved.note
         packAsZip = saved.packAsZip ?? false
+        keepsReplacedFiles = saved.keepsReplacedFiles ?? false
         choices = saved.choices ?? [:]
         deviceID = saved.deviceID
         deviceName = saved.deviceName
@@ -241,7 +246,8 @@ final class TransferJob: Identifiable {
         let ended = SavedJob.Ended(state)
         return SavedJob(deviceID: deviceID, deviceName: deviceName, route: route, policy: policy,
                         downloadPlan: downloadPlan, uploadPlan: uploadPlan,
-                        items: packAsZip && ended == nil ? [] : items, packAsZip: packAsZip, choices: choices,
+                        items: packAsZip && ended == nil ? [] : items, packAsZip: packAsZip,
+                        keepsReplacedFiles: keepsReplacedFiles ? true : nil, choices: choices,
                         remoteNames: items.isEmpty || runtime.remoteNames.isEmpty ? nil : runtime.remoteNames,
                         foldersToDate: runtime.foldersToDate.isEmpty ? nil : runtime.foldersToDate,
                         id: id, startedAt: startedAt, finishedAt: finishedAt, ended: ended, note: note)

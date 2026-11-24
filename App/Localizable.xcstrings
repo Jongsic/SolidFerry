@@ -5965,6 +5965,36 @@
           }
         }
       }
+    },
+    "Keep the creation time of files being replaced": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "덮어쓴 파일의 생성 시각 유지"
+          }
+        }
+      }
+    },
+    "Apps that sort by when files were added still show them where they were. If copying stops partway, a file being replaced is left incomplete.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "추가된 순으로 보여 주는 앱에서도 원래 자리에 그대로 보입니다. 덮어쓰는 도중에 멈추면 그 파일이 불완전하게 남습니다."
+          }
+        }
+      }
+    },
+    "Available when the device is connected over ADB.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ADB로 연결해야 사용할 수 있습니다."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

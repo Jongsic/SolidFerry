@@ -35,6 +35,8 @@ struct UploadSheet: View {
     @State private var uploadDates = UploadDatesState.checking
     /// Send as a zip to unpack on the phone (offered when the phone doesn't keep dates).
     @State private var packAsZip = UserDefaults.standard.bool(forKey: SettingsKey.zipWhenDatesNotKept)
+    /// Files replaced on the device keep when they were created there (Settings gives the default).
+    @State private var keepsReplacedFiles = UserDefaults.standard.bool(forKey: SettingsKey.keepReplacedFiles)
 
     /// The upload as one archive, when that's offered.
     private var zipPackage: ZipPackage? {
@@ -84,6 +86,7 @@ struct UploadSheet: View {
                                     hashAvailable: request.fileSystem.capabilities.deviceHashing, uploadDates: uploadDates,
                                     comparedAs: comparedPolicy, refresh: refresh, failure: scanError)
                     .onAppear { policy = policy.normalized(hashAvailable: request.fileSystem.capabilities.deviceHashing) }
+                keepReplacedChoice
             }
 
             Divider()
@@ -187,13 +190,33 @@ struct UploadSheet: View {
         }
     }
 
+    /// Shown on every connection; usable where the connection can keep the file it replaces.
+    @ViewBuilder private var keepReplacedChoice: some View {
+        let available = request.fileSystem.capabilities.keepsReplacedFiles
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle("Keep the creation time of files being replaced", isOn: available ? $keepsReplacedFiles : .constant(false))
+                .disabled(!available)
+            Group {
+                if available {
+                    Text("Apps that sort by when files were added still show them where they were. If copying stops partway, a file being replaced is left incomplete.")
+                } else {
+                    Text("Available when the device is connected over ADB.")
+                }
+            }
+            .appFont(.caption).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     private var keptChoices: [String: ConflictChoice] { FileRow.choices(choices, stillInTheWayIn: rows) }
 
     private func start() {
         PolicyStore.remember(policy, toMac: false)
         queue.enqueue(TransferJob(deviceID: request.deviceID, deviceName: request.deviceName,
                                   route: .upload(sources: request.sources, to: request.destination), policy: policy,
-                                  uploadPlan: plan, packAsZip: sendsZip, choices: sendsZip ? [:] : keptChoices,
+                                  uploadPlan: plan, packAsZip: sendsZip,
+                                  keepsReplacedFiles: keepsReplacedFiles && request.fileSystem.capabilities.keepsReplacedFiles,
+                                  choices: sendsZip ? [:] : keptChoices,
                                   lookedUp: lookedUp))
         dismiss()
     }

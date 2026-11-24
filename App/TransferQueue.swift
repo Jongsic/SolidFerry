@@ -750,7 +750,7 @@ final class TransferQueue {
                 let sourceFS = job.route.sourceDeviceID.flatMap { hub.session($0)?.fileSystem }
                 let moveRoute: Bool = if case .deviceCopy(_, _, _, _, true) = job.route { true } else { false }
                 let sameDevice = job.route.sourceDeviceID == job.deviceID
-                let writing = Self.uploadWriting(size: item.size)
+                let writing = Self.uploadWriting(size: item.size, keepingReplaced: job.keepsReplacedFiles)
                 group.addTask {
                     do {
                         let progress: @Sendable (Int) -> Void = { n in counter.withLock { $0 += n } }
@@ -977,13 +977,14 @@ extension TransferQueue {
         return mb > 0 ? UInt64(mb) * 1_000_000 : .max
     }
 
-    /// How a file of `size` lands, from Settings: straight under its name only up to the
-    /// size set there; keeping the file it replaces at any size, and before going straight.
-    static func uploadWriting(size: UInt64?) -> UploadWriting {
+    /// How a file of `size` lands: straight under its name as Settings allow, only up to the
+    /// size set there; keeping the file it replaces (the job's choice) at any size, and before
+    /// going straight.
+    static func uploadWriting(size: UInt64?, keepingReplaced: Bool) -> UploadWriting {
         let defaults = UserDefaults.standard
         let straight = defaults.bool(forKey: SettingsKey.writeNewFilesDirectly) && size.map { $0 <= directWriteLimit } == true
         let replacedFile: UploadWriting.ReplacedFile =
-            if defaults.bool(forKey: SettingsKey.keepReplacedFiles) { .intoExisting }
+            if keepingReplaced { .intoExisting }
             else if straight, defaults.bool(forKey: SettingsKey.writeReplacedFilesDirectly) { .straight }
             else { .temporary }
         return UploadWriting(newFile: straight ? .straight : .temporary, replacedFile: replacedFile)

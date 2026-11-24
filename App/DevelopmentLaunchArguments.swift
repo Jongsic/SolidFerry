@@ -16,6 +16,7 @@ import TransferKit
 ///     -dev.deviceCopy SERIAL[>TO_SERIAL]|/device/source|/device/folder|copy|move
 ///     -dev.policy skip|overwrite|…                policy for the jobs above
 ///     -dev.datesOnly YES                          with it, "when only the date differs, just set the date"
+///     -dev.keepReplaced YES                       uploads above: files replaced on the device keep their creation time
 ///     -dev.deviceName NAME                        the device name the jobs above show
 ///     -dev.resumeSaved YES                        resume jobs saved at the last quit
 ///     -dev.pauseAfter SECONDS                     pause the jobs above that long after one starts
@@ -190,7 +191,8 @@ enum DevelopmentLaunchArguments {
         for s in specs("dev.upload", parts: 3) {
             enqueue(TransferJob(deviceID: s[0], deviceName: name(s[0]),
                                       route: .upload(sources: [URL(fileURLWithPath: s[2])], to: RemoteRef(path: s[1])),
-                                      policy: policy, packAsZip: defaults.bool(forKey: "dev.zip")))
+                                      policy: policy, packAsZip: defaults.bool(forKey: "dev.zip"),
+                                      keepsReplacedFiles: defaults.bool(forKey: "dev.keepReplaced")))
         }
         for s in specs("dev.deviceCopy", parts: 4) {
             let ref = RemoteRef(path: s[1])

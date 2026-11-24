@@ -187,7 +187,9 @@ struct DeviceCopySheet: View {
             deviceID: request.destinationDeviceID, deviceName: request.destinationDeviceName,
             route: .deviceCopy(sources: request.items.map(\.entry), fromDeviceID: first.deviceID,
                                fromDeviceName: first.deviceName, to: request.destination, move: move && request.sameDevice),
-            policy: policy, downloadPlan: plan, choices: keptChoices, lookedUp: lookedUp))
+            policy: policy, downloadPlan: plan,
+            keepsReplacedFiles: UserDefaults.standard.bool(forKey: SettingsKey.keepReplacedFiles),
+            choices: keptChoices, lookedUp: lookedUp))
         dismiss()
     }
 }
