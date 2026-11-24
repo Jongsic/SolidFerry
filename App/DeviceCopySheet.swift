@@ -38,6 +38,13 @@ struct DeviceCopySheet: View {
     @State private var previewing = false
     /// Bumped by the list's refresh button: the selection and the destination are read again.
     @State private var refreshes = 0
+    @State private var sourceConnected: (any DeviceFileSystem)?
+    @State private var destinationConnected: (any DeviceFileSystem)?
+
+    /// The devices' connections now (`followsConnection`).
+    private var sourceFileSystem: any DeviceFileSystem { sourceConnected ?? request.sourceFileSystem }
+    private var destinationFileSystem: any DeviceFileSystem { destinationConnected ?? request.destinationFileSystem }
+    private var connections: [ObjectIdentifier] { [ObjectIdentifier(sourceFileSystem), ObjectIdentifier(destinationFileSystem)] }
     @State private var uploadDates = UploadDatesState.checking
 
     init(request: DeviceCopyRequest) {
@@ -99,34 +106,42 @@ struct DeviceCopySheet: View {
         .navigationTitle(move ? Text("Move to \(request.destination.name)") : Text("Copy to \(request.destination.name)"))
         .textArea(.panels)
         .scaledButtons()
-        .task(id: ScanKey(previewing: previewing, refreshes: refreshes)) {
+        .followsConnection(of: request.items.first?.deviceID ?? "", $sourceConnected)
+        .followsConnection(of: request.destinationDeviceID, $destinationConnected)
+        // A scan that failed is tried again on a new connection.
+        .task(id: ScanKey(previewing: previewing, refreshes: refreshes, connections: connections)) {
             guard previewing, plan == nil else { return }
             do {
-                plan = try await TransferPlanner.expand(request.items.map(\.entry), in: request.sourceFileSystem)
+                plan = try await TransferPlanner.expand(request.items.map(\.entry), in: sourceFileSystem)
             } catch {
                 if !(error is CancellationError) { scanError = UserMessage.describe(error) }
             }
         }
-        .task {
+        .task(id: ObjectIdentifier(destinationFileSystem)) {
             // Once per phone and kind of connection; see UploadDates.
-            uploadDates = switch await UploadDates.probe(request.destinationDeviceID, fs: request.destinationFileSystem, in: request.destination) {
+            uploadDates = .checking
+            uploadDates = switch await UploadDates.probe(request.destinationDeviceID, fs: destinationFileSystem, in: request.destination) {
             case .kept: .kept
             case .ignored: .ignored
             case nil: .notApplicable // couldn't tell; compare as usual
             }
         }
-        .task(id: StatKey(files: plan?.files.count, folders: policy.existingFolder, refreshes: refreshes)) { await compare() }
+        .task(id: StatKey(files: plan?.files.count, folders: policy.existingFolder, refreshes: refreshes, connections: connections)) {
+            await compare()
+        }
     }
 
     private struct ScanKey: Equatable {
         let previewing: Bool
         let refreshes: Int
+        let connections: [ObjectIdentifier]
     }
 
     private struct StatKey: Equatable {
         let files: Int?
         let folders: ExistingFolderPolicy
         let refreshes: Int
+        let connections: [ObjectIdentifier]
     }
 
     private func refresh() {
@@ -143,7 +158,7 @@ struct DeviceCopySheet: View {
 
     /// The policy as files are actually compared.
     private var comparedPolicy: TransferPolicy {
-        TransferQueue.comparable(policy, uploadingTo: request.destinationDeviceID, fs: request.destinationFileSystem)
+        TransferQueue.comparable(policy, uploadingTo: request.destinationDeviceID, fs: destinationFileSystem)
     }
 
     private var summary: TransferSummary? {
@@ -158,10 +173,10 @@ struct DeviceCopySheet: View {
         compared = nil
         comparison += 1
         let current = comparison
-        let fs = request.destinationFileSystem
+        let fs = destinationFileSystem
         // The same placing as the queue's, comparing only (without tidying leftovers).
         var placer = DeviceFolderPlacer(on: fs, destination: request.destination,
-                                        sizesWrap: !fs.capabilities.exactLargeSizes || !request.sourceFileSystem.capabilities.exactLargeSizes)
+                                        sizesWrap: !fs.capabilities.exactLargeSizes || !sourceFileSystem.capabilities.exactLargeSizes)
         do {
             let effective = plan.applyingFolderPolicy(policy.existingFolder, existingNames: FolderNames(try await placer.listing(of: request.destination).keys))
             let files = effective.files.map { (relativePath: $0.relativePath, size: $0.entry.size, modified: $0.entry.modified) }

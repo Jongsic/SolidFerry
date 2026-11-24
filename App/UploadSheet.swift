@@ -37,6 +37,11 @@ struct UploadSheet: View {
     @State private var packAsZip = UserDefaults.standard.bool(forKey: SettingsKey.zipWhenDatesNotKept)
     /// Files replaced on the device keep when they were created there (Settings gives the default).
     @State private var keepsReplacedFiles = UserDefaults.standard.bool(forKey: SettingsKey.keepReplacedFiles)
+    @State private var connected: (any DeviceFileSystem)?
+
+    /// The device's connection now (`followsConnection`).
+    private var fileSystem: any DeviceFileSystem { connected ?? request.fileSystem }
+    private var connection: ObjectIdentifier { ObjectIdentifier(fileSystem) }
 
     /// The upload as one archive, when that's offered.
     private var zipPackage: ZipPackage? {
@@ -83,11 +88,13 @@ struct UploadSheet: View {
             } else {
                 FileComparisonPanel(policy: $policy, choices: $choices, previewing: $previewing, rows: rows, summary: summary,
                                     progress: compared,
-                                    hashAvailable: request.fileSystem.capabilities.deviceHashing, uploadDates: uploadDates,
+                                    hashAvailable: fileSystem.capabilities.deviceHashing, uploadDates: uploadDates,
                                     comparedAs: comparedPolicy, refresh: refresh, failure: scanError,
                                     keepReplaced: KeepReplacedChoice(isOn: $keepsReplacedFiles,
-                                                                     available: request.fileSystem.capabilities.keepsReplacedFiles))
-                    .onAppear { policy = policy.normalized(hashAvailable: request.fileSystem.capabilities.deviceHashing) }
+                                                                     available: fileSystem.capabilities.keepsReplacedFiles))
+                    .onChange(of: connection, initial: true) {
+                        policy = policy.normalized(hashAvailable: fileSystem.capabilities.deviceHashing)
+                    }
             }
 
             Divider()
@@ -109,15 +116,18 @@ struct UploadSheet: View {
                 scanError = UserMessage.describe(error)
             }
         }
-        .task {
+        .followsConnection(of: request.deviceID, $connected)
+        .task(id: connection) {
             // Once per phone and kind of connection; see UploadDates.
-            uploadDates = switch await UploadDates.probe(request.deviceID, fs: request.fileSystem, in: request.destination) {
+            uploadDates = .checking
+            uploadDates = switch await UploadDates.probe(request.deviceID, fs: fileSystem, in: request.destination) {
             case .kept: .kept
             case .ignored: .ignored
             case nil: .notApplicable // couldn't tell; compare as usual
             }
         }
-        .task(id: StatKey(files: plan?.files.count, folders: policy.existingFolder, previewing: previewing, refreshes: refreshes)) {
+        .task(id: StatKey(files: plan?.files.count, folders: policy.existingFolder, previewing: previewing, refreshes: refreshes,
+                          connection: connection)) {
             await compare()
         }
     }
@@ -127,6 +137,7 @@ struct UploadSheet: View {
         let folders: ExistingFolderPolicy
         let previewing: Bool
         let refreshes: Int
+        let connection: ObjectIdentifier
     }
 
     private func refresh() {
@@ -145,7 +156,7 @@ struct UploadSheet: View {
 
     /// The policy as files are actually compared.
     private var comparedPolicy: TransferPolicy {
-        TransferQueue.comparable(policy, uploadingTo: request.deviceID, fs: request.fileSystem)
+        TransferQueue.comparable(policy, uploadingTo: request.deviceID, fs: fileSystem)
     }
 
     private var summary: TransferSummary? {
@@ -160,7 +171,7 @@ struct UploadSheet: View {
         compared = nil
         comparison += 1
         let current = comparison
-        let fs = request.fileSystem
+        let fs = fileSystem
         // The same placing as the queue's, comparing only (without tidying leftovers).
         var placer = DeviceFolderPlacer(on: fs, destination: request.destination, sizesWrap: !fs.capabilities.exactLargeSizes)
         do {
@@ -198,7 +209,7 @@ struct UploadSheet: View {
         queue.enqueue(TransferJob(deviceID: request.deviceID, deviceName: request.deviceName,
                                   route: .upload(sources: request.sources, to: request.destination), policy: policy,
                                   uploadPlan: plan, packAsZip: sendsZip,
-                                  keepsReplacedFiles: keepsReplacedFiles && request.fileSystem.capabilities.keepsReplacedFiles,
+                                  keepsReplacedFiles: keepsReplacedFiles && fileSystem.capabilities.keepsReplacedFiles,
                                   choices: sendsZip ? [:] : keptChoices,
                                   lookedUp: lookedUp))
         dismiss()

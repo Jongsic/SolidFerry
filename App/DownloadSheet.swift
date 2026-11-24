@@ -36,6 +36,11 @@ struct DownloadSheet: View {
     @State private var previewing = false
     /// Bumped by the list's refresh button: the selection and the destination are read again.
     @State private var refreshes = 0
+    @State private var connected: (any DeviceFileSystem)?
+
+    /// The device's connection now (`followsConnection`).
+    private var fileSystem: any DeviceFileSystem { connected ?? request.fileSystem }
+    private var connection: ObjectIdentifier { ObjectIdentifier(fileSystem) }
 
     init(request: DownloadRequest) {
         self.request = request
@@ -61,9 +66,11 @@ struct DownloadSheet: View {
             Divider()
 
             FileComparisonPanel(policy: $policy, choices: $choices, previewing: $previewing, rows: rows, summary: summary,
-                                progress: compared, hashAvailable: request.fileSystem.capabilities.deviceHashing,
+                                progress: compared, hashAvailable: fileSystem.capabilities.deviceHashing,
                                 datesApply: true, refresh: refresh, failure: scanError)
-                .onAppear { policy = policy.normalized(hashAvailable: request.fileSystem.capabilities.deviceHashing, toMac: true) }
+                .onChange(of: connection, initial: true) {
+                    policy = policy.normalized(hashAvailable: fileSystem.capabilities.deviceHashing, toMac: true)
+                }
 
             Divider()
 
@@ -74,7 +81,11 @@ struct DownloadSheet: View {
         .navigationTitle("Download to Mac")
         .textArea(.panels)
         .scaledButtons()
-        .task(id: ScanKey(previewing: previewing, refreshes: refreshes)) { if previewing, plan == nil { await scan() } }
+        .followsConnection(of: request.deviceID, $connected)
+        // A scan that failed is tried again on a new connection.
+        .task(id: ScanKey(previewing: previewing, refreshes: refreshes, connection: connection)) {
+            if previewing, plan == nil { await scan() }
+        }
         .onDisappear {
             // Closed without queueing: release Finder's wait on the promises.
             if !queued { request.completions.forEach { $0(CocoaError(.userCancelled)) } }
@@ -87,6 +98,7 @@ struct DownloadSheet: View {
     private struct ScanKey: Equatable {
         let previewing: Bool
         let refreshes: Int
+        let connection: ObjectIdentifier
     }
 
     private struct StatKey: Equatable {
@@ -124,7 +136,7 @@ struct DownloadSheet: View {
     private func scan() async {
         scanError = nil
         do {
-            plan = try await TransferPlanner.expand(request.entries, in: request.fileSystem, progress: { count in
+            plan = try await TransferPlanner.expand(request.entries, in: fileSystem, progress: { count in
                 Task { @MainActor in scanned = count }
             })
         } catch is CancellationError {
@@ -139,7 +151,7 @@ struct DownloadSheet: View {
         guard let plan else { return }
         let destination = destination
         let effective = plan.applyingFolderPolicy(policy.existingFolder, destination: destination)
-        let sizesWrap = !request.fileSystem.capabilities.exactLargeSizes
+        let sizesWrap = !fileSystem.capabilities.exactLargeSizes
         rows = nil
         compared = nil
         let result = try? await stoppable { stop in
