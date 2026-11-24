@@ -172,13 +172,16 @@ struct FileComparisonPanel: View {
     var refresh: (() -> Void)?
     /// Why the list couldn't be made: shown in its place, with a way to try again.
     var failure: String?
+    /// Uploads: keeping the files they replace, with the policy.
+    var keepReplaced: KeepReplacedChoice?
     @State private var filter = FileFilter.all
 
     private var compared: TransferPolicy { comparedAs ?? policy }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            PolicyBar(policy: $policy, hashAvailable: hashAvailable, uploadDates: uploadDates, datesApply: datesApply)
+            PolicyBar(policy: $policy, hashAvailable: hashAvailable, uploadDates: uploadDates, datesApply: datesApply,
+                      keepReplaced: keepReplaced)
                 .disabled(previewing && summary == nil && failure == nil)
             Divider()
             // The list is always there and takes the room the window has; before the preview
@@ -353,6 +356,13 @@ private struct FilterBar: View {
     }
 }
 
+/// The upload choice of keeping the files it replaces (`TransferJob.keepsReplacedFiles`).
+struct KeepReplacedChoice {
+    var isOn: Binding<Bool>
+    /// The connection can (`FSCapabilities.keepsReplacedFiles`); otherwise shown off, with why.
+    let available: Bool
+}
+
 /// The policy for every file in the way, in two compact rows: a menu for files and a
 /// segmented control for folders, with one line saying what the file choice does.
 struct PolicyBar: View {
@@ -360,6 +370,7 @@ struct PolicyBar: View {
     let hashAvailable: Bool
     var uploadDates = UploadDatesState.notApplicable
     var datesApply = false
+    var keepReplaced: KeepReplacedChoice?
 
     private var differs: Bool { policy.existing == .ifSizeOrDateDiffers || policy.existing == .ifHashDiffers }
 
@@ -394,6 +405,12 @@ struct PolicyBar: View {
                               ? "A file already here with the same contents gets the date from the device; nothing is copied."
                               : "A file already here with the same size gets the date from the device; nothing is copied.")
                         .gridCellColumns(2)
+                }
+            }
+            if let keepReplaced {
+                GridRow {
+                    Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
+                    keepReplacedRow(keepReplaced).gridCellColumns(2)
                 }
             }
             GridRow {
@@ -440,6 +457,23 @@ struct PolicyBar: View {
                         .help("Other tools often reset the date to when the file was copied.")
                 }
             }
+        }
+    }
+
+    /// Shown on every connection; usable where the connection can keep the file it replaces.
+    private func keepReplacedRow(_ choice: KeepReplacedChoice) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Toggle("Keep the creation time of files being replaced", isOn: choice.available ? choice.isOn : .constant(false))
+                .disabled(!choice.available)
+            Group {
+                if choice.available {
+                    Text("Apps that sort by when files were added still show them where they were. If copying stops partway, a file being replaced is left incomplete.")
+                } else {
+                    Text("Available when the device is connected over ADB.")
+                }
+            }
+            .appFont(.caption).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
         }
     }
 

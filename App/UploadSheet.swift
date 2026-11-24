@@ -84,9 +84,10 @@ struct UploadSheet: View {
                 FileComparisonPanel(policy: $policy, choices: $choices, previewing: $previewing, rows: rows, summary: summary,
                                     progress: compared,
                                     hashAvailable: request.fileSystem.capabilities.deviceHashing, uploadDates: uploadDates,
-                                    comparedAs: comparedPolicy, refresh: refresh, failure: scanError)
+                                    comparedAs: comparedPolicy, refresh: refresh, failure: scanError,
+                                    keepReplaced: KeepReplacedChoice(isOn: $keepsReplacedFiles,
+                                                                     available: request.fileSystem.capabilities.keepsReplacedFiles))
                     .onAppear { policy = policy.normalized(hashAvailable: request.fileSystem.capabilities.deviceHashing) }
-                keepReplacedChoice
             }
 
             Divider()
@@ -187,24 +188,6 @@ struct UploadSheet: View {
             Text("This device gives files the date they arrive. Unpacking a zip on the device keeps the original dates, but takes a step on the device.")
                 .appFont(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    /// Shown on every connection; usable where the connection can keep the file it replaces.
-    @ViewBuilder private var keepReplacedChoice: some View {
-        let available = request.fileSystem.capabilities.keepsReplacedFiles
-        VStack(alignment: .leading, spacing: 4) {
-            Toggle("Keep the creation time of files being replaced", isOn: available ? $keepsReplacedFiles : .constant(false))
-                .disabled(!available)
-            Group {
-                if available {
-                    Text("Apps that sort by when files were added still show them where they were. If copying stops partway, a file being replaced is left incomplete.")
-                } else {
-                    Text("Available when the device is connected over ADB.")
-                }
-            }
-            .appFont(.caption).foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
         }
     }
 
