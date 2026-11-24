@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// A download, upload or device-copy dialog to show.
@@ -35,6 +36,15 @@ enum TransferDialogs {
 
 struct TransferDialogWindow: View {
     let id: UUID?
+
+    /// A dialog opened by a drag and drop with Finder comes up while Finder is the active app;
+    /// asking to be active isn't always granted, so the window is also put in front of Finder's.
+    private static func bringForward(_ window: NSWindow) {
+        NSApp.activate()
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+    }
+
     var body: some View {
         Group {
             if let id, let request = TransferDialogs.request(id) {
@@ -46,6 +56,7 @@ struct TransferDialogWindow: View {
                     }
                 }
                 .onDisappear { TransferDialogs.remove(id) }
+                .background(WindowReader { window in Task { @MainActor in Self.bringForward(window) } })
             } else {
                 // Nothing to show (its request is gone, as for a window macOS brings back
                 // at launch): close.

@@ -30,9 +30,6 @@ extension FileTableView.Coordinator {
         if !items.isEmpty {
             let folder = folder(at: row, dropOperation)
             guard (folder ?? parent.currentFolder) != nil else { return false }
-            // Bring this window forward: the copy dialog opens on it.
-            NSApp.activate()
-            tableView.window?.makeKeyAndOrderFront(nil)
             return parent.host.copyFromDevice(items, into: folder, move: dropOperationIsMove(items, info: info))
         }
         let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: Self.fileURLOptions) as? [URL] ?? []
@@ -147,10 +144,6 @@ extension FileTableView.Coordinator {
     private func flushDrop(_ id: UUID? = nil) {
         guard let drop = pendingDrop, id == nil || drop.id == id, let folder = drop.folder, !drop.entries.isEmpty else { return }
         pendingDrop = nil
-        // The copy dialog opens on the window the drag came from; bring that one forward,
-        // not whichever window happened to be key.
-        NSApp.activate()
-        table?.window?.makeKeyAndOrderFront(nil)
         parent.host.downloadDropped(drop.entries, to: folder, completions: drop.completions)
     }
 }
