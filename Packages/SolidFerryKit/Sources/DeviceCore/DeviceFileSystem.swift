@@ -371,26 +371,54 @@ extension DeviceFileSystem {
     }
 }
 
-/// How an upload lands on the phone.
-public enum UploadWriting: Sendable, Equatable {
-    /// Under a hidden temporary name, renamed into place when complete: an interrupted upload
-    /// leaves nothing under the real name, and a file being replaced stays until then.
-    case safe
-    /// New files straight under their name (no rename, faster for many small files; an
-    /// interrupted one leaves a broken file); files being replaced the safe way.
-    case directForNewFiles
-    /// Every file straight under its name. A file being replaced is gone from the start, so
-    /// an interrupted upload can't give it back.
-    case direct
+/// How an upload lands on the phone: a new file, and one that replaces a file there.
+public struct UploadWriting: Sendable, Equatable, CustomStringConvertible {
+    public enum NewFile: Sendable {
+        /// Under a hidden temporary name, renamed into place when complete: an interrupted
+        /// upload leaves nothing under the real name.
+        case temporary
+        /// Straight under its name: no rename, faster for many small files; an interrupted
+        /// one leaves a broken file.
+        case straight
+    }
+
+    public enum ReplacedFile: Sendable {
+        /// Under a hidden temporary name, renamed over the file there when complete: the file
+        /// there stays until then.
+        case temporary
+        /// Straight under its name: the file there is gone from the start, so an interrupted
+        /// upload can't give it back.
+        case straight
+        /// Under a hidden temporary name, then copied into the file there, which stays the same
+        /// file: the phone keeps when it was added (the media library's date added, which some
+        /// apps sort by). An upload interrupted while it's copied in leaves the file there
+        /// incomplete. Over ADB (QUIRKS A22); elsewhere it's `temporary`.
+        case intoExisting
+    }
+
+    public var newFile: NewFile
+    public var replacedFile: ReplacedFile
+
+    public init(newFile: NewFile, replacedFile: ReplacedFile) {
+        self.newFile = newFile
+        self.replacedFile = replacedFile
+    }
+
+    /// Every file under a temporary name first.
+    public static let safe = Self(newFile: .temporary, replacedFile: .temporary)
+    /// New files straight under their name; files being replaced the safe way.
+    public static let directForNewFiles = Self(newFile: .straight, replacedFile: .temporary)
+    /// Every file straight under its name.
+    public static let direct = Self(newFile: .straight, replacedFile: .straight)
+    /// Every file under a temporary name first; one that replaces a file is copied into it.
+    public static let keepingReplaced = Self(newFile: .temporary, replacedFile: .intoExisting)
 
     /// Whether an upload goes straight under its name.
     public func isStraight(replacing: Bool) -> Bool {
-        switch self {
-        case .safe: false
-        case .directForNewFiles: !replacing
-        case .direct: true
-        }
+        replacing ? replacedFile == .straight : newFile == .straight
     }
+
+    public var description: String { "new \(newFile), replaced \(replacedFile)" }
 }
 
 /// `listTree` with `listing` reading each folder: breadth-first from `roots`, each folder

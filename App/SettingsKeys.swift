@@ -9,6 +9,9 @@ enum SettingsKey {
     static let zipWhenDatesNotKept = "zipWhenDatesNotKept"
     static let writeNewFilesDirectly = "writeNewFilesDirectly"
     static let writeReplacedFilesDirectly = "writeReplacedFilesDirectly"
+    /// A file that replaces one on the device keeps the time it was created there (it's
+    /// copied into that file rather than taking its place).
+    static let keepReplacedFiles = "keepReplacedFiles"
     /// Largest file written directly, in MB; 0 = any size.
     static let directWriteLimitMB = "directWriteLimitMB"
     /// Largest picture / text file shown in the viewer, in MB.
@@ -57,6 +60,7 @@ enum SettingsKey {
             zipWhenDatesNotKept: false,
             writeNewFilesDirectly: false,
             writeReplacedFilesDirectly: false,
+            keepReplacedFiles: false,
             directWriteLimitMB: 16,
             viewerImageLimitMB: 50,
             viewerTextLimitMB: 5,

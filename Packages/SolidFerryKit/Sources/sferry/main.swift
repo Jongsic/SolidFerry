@@ -393,6 +393,7 @@ do {
             try await round("  … with dates, 2 at a time", "together", replacing: false, .safe, dated: true, together: 2)
             try await round("new files, straight", "direct", replacing: false, .direct)
             try await round("replacing, temporary name", "safe", replacing: true, .safe)
+            try await round("replacing, into the file there", "safe", replacing: true, .keepingReplaced)
             try await round("replacing, straight", "direct", replacing: true, .direct)
         } catch {
             print("failed: \(error)")

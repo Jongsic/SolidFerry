@@ -168,11 +168,16 @@ private struct TransferSettings: View {
     @AppStorage(SettingsKey.writeNewFilesDirectly) private var writeNewFilesDirectly = false
     @AppStorage(SettingsKey.writeReplacedFilesDirectly) private var writeReplacedFilesDirectly = false
     @AppStorage(SettingsKey.directWriteLimitMB) private var directWriteLimitMB = 16
+    @AppStorage(SettingsKey.keepReplacedFiles) private var keepReplacedFiles = false
 
     var body: some View {
         Section {
             Toggle("Keep file dates on devices that change them: send as a zip", isOn: $zipWhenDatesNotKept)
             Text("Some devices give files the date they arrive (Galaxy in File transfer mode). With this on, uploads to them start out as one zip to unpack on the device, which keeps the dates. You can still choose per upload.")
+                .appFont(.callout).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Toggle("Keep the creation time of files being replaced (ADB)", isOn: $keepReplacedFiles)
+            Text("Over ADB, a file on the device that's replaced keeps the time it was first created there, so apps that sort by when files were added (such as photo pickers when attaching) still show it where it was. If copying stops partway, that file is left incomplete; send it again.")
                 .appFont(.callout).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         } header: {
@@ -196,11 +201,17 @@ private struct TransferSettings: View {
             .disabled(!writeNewFilesDirectly)
             .padding(.leading, 20)
             Toggle("Also files that replace existing ones", isOn: $writeReplacedFilesDirectly)
-                .disabled(!writeNewFilesDirectly)
+                .disabled(!writeNewFilesDirectly || keepReplacedFiles)
                 .padding(.leading, 20)
-            Text("If copying stops, the files being replaced at that moment lose their originals.")
+            Group {
+                if keepReplacedFiles {
+                    Text("Not while replaced files keep their creation time.")
+                } else {
+                    Text("If copying stops, the files being replaced at that moment lose their originals.")
+                }
+            }
                 .appFont(.callout)
-                .foregroundStyle(writeReplacedFilesDirectly ? Color.orange : Color.secondary)
+                .foregroundStyle(writeReplacedFilesDirectly && !keepReplacedFiles ? Color.orange : Color.secondary)
                 .padding(.leading, 20)
                 .fixedSize(horizontal: false, vertical: true)
         } header: {

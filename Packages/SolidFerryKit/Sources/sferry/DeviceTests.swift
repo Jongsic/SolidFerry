@@ -1,3 +1,4 @@
+import AdbKit
 import DeviceCore
 import Foundation
 import os
@@ -207,7 +208,7 @@ struct DeviceTestSuite: DeviceTestHelpers {
             ("upload as planned: replace, new, and a file that turned up isn't overwritten", {
                 // The queue says from planning whether a file is there; every way of writing
                 // must honour it (DeviceFileSystem.upload).
-                for (index, writing) in [UploadWriting.safe, .directForNewFiles, .direct].enumerated() {
+                for (index, writing) in [UploadWriting.safe, .directForNewFiles, .direct, .keepingReplaced].enumerated() {
                     let fresh = remote.appending("plan-new-\(index).txt")
                     try await Self.step("\(writing): new file") {
                         try await fs.upload(try makeLocal("n\(index).txt", text: "NEW \(index)"), to: fresh, modified: nil,
@@ -239,10 +240,43 @@ struct DeviceTestSuite: DeviceTestHelpers {
                 }
                 try await noLeftovers(remote, on: fs)
             }),
+            ("replacing: the file keeps its date, also once it has been read", {
+                // Renamed over a file, a Galaxy gives it the time it's first read (QUIRKS A23).
+                guard fs.capabilities.keepsUploadDates else {
+                    print("    (this phone doesn't keep upload dates)")
+                    return
+                }
+                let date = Date(timeIntervalSince1970: 1_500_000_000)
+                for (index, writing) in [UploadWriting.safe, .direct, .keepingReplaced].enumerated() {
+                    let target = remote.appending("dated-\(index).txt")
+                    try await fs.upload(try makeLocal("dated-old-\(index).txt", text: "OLD"), to: target, modified: nil) { _ in }
+                    try await fs.upload(try makeLocal("dated-new-\(index).txt", text: "NEW \(index)"), to: target, modified: date,
+                                        replacing: true, writing: writing) { _ in }
+                    try Self.check(try await read(target, on: fs) == Data("NEW \(index)".utf8), "\(writing): not replaced")
+                    let entry = try await listing(remote, on: fs)["dated-\(index).txt"]
+                    let delta = abs((entry?.modified ?? .distantPast).timeIntervalSince(date))
+                    try Self.check(delta <= ExistingItem.dateTolerance, "\(writing): date off by \(Int(delta)) s after reading it")
+                }
+            }),
+            ("replacing into the file there: new contents, still the same file, where the connection can", {
+                let target = remote.appending("kept.txt")
+                try await fs.upload(try makeLocal("kept-old.txt", text: "OLD"), to: target, modified: nil) { _ in }
+                let before = try await fileIdentity(target, on: fs)
+                try await fs.upload(try makeLocal("kept-new.txt", text: "NEW CONTENTS"), to: target, modified: nil,
+                                    replacing: true, writing: .keepingReplaced) { _ in }
+                try Self.check(try await read(target, on: fs) == Data("NEW CONTENTS".utf8), "not replaced")
+                try await noLeftovers(remote, on: fs)
+                guard let before else {
+                    print("    (this connection replaces the file)")
+                    return
+                }
+                let after = try await fileIdentity(target, on: fs)
+                try Self.check(after == before, "a new file took its place (inode \(before) → \(after.map(String.init) ?? "none"))")
+            }),
             ("names differing only in case: the file there isn't overwritten", {
                 // Phone storage ignores case (QUIRKS S7): "Note.TXT" is where "note.txt" is.
                 let dir = try await folder("case", files: ["note.txt": "THERE", "other.txt": "OTHER"])
-                for (index, writing) in [UploadWriting.safe, .directForNewFiles, .direct].enumerated() {
+                for (index, writing) in [UploadWriting.safe, .directForNewFiles, .direct, .keepingReplaced].enumerated() {
                     do {
                         try await fs.upload(try makeLocal("c\(index).txt", text: "SENT \(index)"), to: dir.appending("NOTE.txt"),
                                             modified: nil, replacing: false, writing: writing) { _ in }
@@ -634,6 +668,17 @@ extension DeviceTestHelpers {
         let url = local.appendingPathComponent(name)
         try Data(text.utf8).write(to: url)
         return url
+    }
+
+    /// Over ADB, the file's inode: the same file while it's the same number. Nil elsewhere.
+    func fileIdentity(_ ref: RemoteRef, on fs: any DeviceFileSystem) async throws -> UInt64? {
+        guard let adb = fs as? AdbFileSystem else { return nil }
+        let quoted = "'" + ref.path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        let printed = String(decoding: try await adb.client.exec(serial: adb.serial, "stat -c %i -- \(quoted)"), as: UTF8.self)
+        guard let inode = UInt64(printed.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            throw DeviceTestSuite.Failure(description: "no inode for \(ref.path): \(printed)")
+        }
+        return inode
     }
 
     func listing(_ dir: RemoteRef, on fs: any DeviceFileSystem) async throws -> [String: RemoteEntry] {

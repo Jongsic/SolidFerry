@@ -5935,6 +5935,36 @@
           }
         }
       }
+    },
+    "Keep the creation time of files being replaced (ADB)": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "덮어쓴 파일의 생성 시각 유지 (ADB)"
+          }
+        }
+      }
+    },
+    "Over ADB, a file on the device that's replaced keeps the time it was first created there, so apps that sort by when files were added (such as photo pickers when attaching) still show it where it was. If copying stops partway, that file is left incomplete; send it again.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ADB로 기기의 파일을 덮어쓸 때, 그 파일이 기기에 처음 생긴 시각을 그대로 유지합니다. 그래서 추가된 순으로 보여 주는 앱(첨부할 때의 사진 선택 화면 등)에서도 원래 자리에 그대로 보입니다. 덮어쓰는 도중에 멈추면 그 파일이 불완전하게 남으니 다시 보내세요."
+          }
+        }
+      }
+    },
+    "Not while replaced files keep their creation time.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "덮어쓴 파일의 생성 시각을 유지하는 동안에는 쓸 수 없습니다."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

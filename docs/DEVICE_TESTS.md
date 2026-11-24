@@ -97,7 +97,9 @@ make build && scripts/bigtest.sh S adb|mtp $D   # MTP: File transfer mode with t
 | Names: names Android rejects | Names containing `" : * ? < > \| \` are rejected up front with a clear error | QUIRKS: shared storage naming rules |
 | Names: special characters | Spaces, `'`, `$`, backtick, Korean, emoji, 200 characters, hidden files. Shell quoting and encoding | |
 | Overwrite | Content is replaced and no temporary file is left | |
-| Upload as planned | For the plan the queue made (new file / overwrite), in all three modes (temporary name, direct for new files only, direct for all): new file content is correct, overwrites replace the file, and a same-named file that appeared after planning is not overwritten but reported as "already exists" | QUIRKS M13, M20 |
+| Upload as planned | For the plan the queue made (new file / overwrite), in all four modes (temporary name, direct for new files only, direct for all, copying into the file being replaced): new file content is correct, overwrites replace the file, and a same-named file that appeared after planning is not overwritten but reported as "already exists" | QUIRKS M13, M20 |
+| Overwrite keeps the date | Overwriting in each mode (temporary name, direct, copying into the file) with a given date: the date is still there after the file has been read | QUIRKS A23 |
+| Overwrite into the file | Copying into the file being replaced: new content, and over ADB the same file (inode) as before | QUIRKS A22 |
 | Failed overwrite | Overwriting with an unreadable local file fails → original unchanged | Protecting the original |
 | Rename | Renaming to an empty name succeeds; an existing name or a name with `/` is rejected; other files are untouched | toybox `mv -n` |
 | Copy within device: onto an existing file | The target gets the source content; the source is unchanged | MTP CopyObject |

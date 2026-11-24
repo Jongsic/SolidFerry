@@ -750,7 +750,7 @@ final class TransferQueue {
                 let sourceFS = job.route.sourceDeviceID.flatMap { hub.session($0)?.fileSystem }
                 let moveRoute: Bool = if case .deviceCopy(_, _, _, _, true) = job.route { true } else { false }
                 let sameDevice = job.route.sourceDeviceID == job.deviceID
-                let writing = item.size.map { $0 <= Self.directWriteLimit } == true ? Self.uploadWriting : .safe
+                let writing = Self.uploadWriting(size: item.size)
                 group.addTask {
                     do {
                         let progress: @Sendable (Int) -> Void = { n in counter.withLock { $0 += n } }
@@ -977,11 +977,16 @@ extension TransferQueue {
         return mb > 0 ? UInt64(mb) * 1_000_000 : .max
     }
 
-    /// How uploads land, from Settings: two separate permissions.
-    static var uploadWriting: UploadWriting {
+    /// How a file of `size` lands, from Settings: straight under its name only up to the
+    /// size set there; keeping the file it replaces at any size, and before going straight.
+    static func uploadWriting(size: UInt64?) -> UploadWriting {
         let defaults = UserDefaults.standard
-        guard defaults.bool(forKey: SettingsKey.writeNewFilesDirectly) else { return .safe }
-        return defaults.bool(forKey: SettingsKey.writeReplacedFilesDirectly) ? .direct : .directForNewFiles
+        let straight = defaults.bool(forKey: SettingsKey.writeNewFilesDirectly) && size.map { $0 <= directWriteLimit } == true
+        let replacedFile: UploadWriting.ReplacedFile =
+            if defaults.bool(forKey: SettingsKey.keepReplacedFiles) { .intoExisting }
+            else if straight, defaults.bool(forKey: SettingsKey.writeReplacedFilesDirectly) { .straight }
+            else { .temporary }
+        return UploadWriting(newFile: straight ? .straight : .temporary, replacedFile: replacedFile)
     }
 
     enum PlaceOnMac: Sendable { case free, thisFile, taken(String) }
@@ -1009,7 +1014,7 @@ extension TransferQueue {
         } catch DeviceFSError.alreadyExists(let name) where item.decision != .overwrite {
             let there = try? await fs.entry(at: ref)
             guard ExistingItem.isAlreadySent(there, size: item.size, modified: item.modified,
-                                             sentUnderTemporaryName: writing == .safe,
+                                             sentUnderTemporaryName: !writing.isStraight(replacing: false),
                                              phoneKeepsDates: fs.capabilities.keepsUploadDates) else {
                 throw DeviceFSError.alreadyExists(name)
             }

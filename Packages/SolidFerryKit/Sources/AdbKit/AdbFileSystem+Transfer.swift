@@ -113,7 +113,8 @@ extension AdbFileSystem {
     /// Sends to a hidden partial file next to the destination and renames it into place, so
     /// a file already there stays intact until the new one is complete (a failed or
     /// cancelled upload never costs the user the original). Going straight to the destination
-    /// (see `UploadWriting`) saves the rename, which is a shell command of its own.
+    /// (see `UploadWriting`) saves the rename, which is a shell command of its own; copying
+    /// into the file there takes the rename's place and keeps that file.
     public func upload(_ source: URL, to destination: RemoteRef, modified: Date?, replacing: Bool?,
                        writing: UploadWriting, progress: @escaping @Sendable (Int) -> Void) async throws {
         try await send(.file(source), to: destination, modified: modified, replacing: replacing, writing: writing, progress: progress)
@@ -159,11 +160,9 @@ extension AdbFileSystem {
                 canceller.attach(socket)
                 let sync = SyncConnection(socket: socket)
                 var direct = false
-                switch writing {
-                case .safe: break
-                case .directForNewFiles where replacing == true: break
-                case .direct where replacing == true: direct = true
-                default:
+                if replacing == true {
+                    direct = writing.isStraight(replacing: true)
+                } else if writing.isStraight(replacing: false) || writing.isStraight(replacing: true) {
                     // adbd deletes a file it's about to receive over, so going straight needs
                     // to know whether one is there (a stat on this connection, about a millisecond).
                     let there = Self.exists(destination.path, sync: sync, v2: statV2)
@@ -184,7 +183,17 @@ extension AdbFileSystem {
                     // Planned as a new file: one that turned up since isn't overwritten.
                     try await runIfFree(destination, "mv -f -- \(from) \(to)")
                 } else {
-                    try await run("mv -f -- \(from) \(to)")
+                    // Its date is set again once it's in place: renamed over a file, it takes the
+                    // time it's first read (QUIRKS A23); copied into one, the time of copying.
+                    let date = modified.map { " && touch -m -d \($0.formatted(.iso8601)) -- \(to)" } ?? ""
+                    if writing.replacedFile == .intoExisting {
+                        // Copied into the file there, which stays the same file (QUIRKS A22). A
+                        // link, or nothing there, is replaced as usual.
+                        try await run("if [ -f \(to) ] && [ ! -L \(to) ]; then cat -- \(from) > \(to) && rm -f -- \(from); "
+                            + "else mv -f -- \(from) \(to); fi\(date)")
+                    } else {
+                        try await run("mv -f -- \(from) \(to)\(date)")
+                    }
                 }
             }
         } catch {
