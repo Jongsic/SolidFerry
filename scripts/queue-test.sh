@@ -18,7 +18,7 @@
 # folder on the Mac, with generated files; all deleted at the end.
 set -u
 
-BUNDLE=$(ls -d "$(cd "$(dirname "$0")/.." && pwd)"/build/Build/Products/Debug/*.app 2>/dev/null | head -1)
+BUNDLE=$(ls -d "$(cd "$(dirname "$0")/.." && pwd)"/build/DerivedData.noindex/Build/Products/Debug/*.app 2>/dev/null | head -1)
 NAME=$(basename "$BUNDLE" .app)
 APP="$BUNDLE/Contents/MacOS/$NAME"
 [ $# -eq 2 ] || { echo "usage: $0 SERIAL_A[:adb|mtp] SERIAL_B[:adb|mtp]"; exit 2; }

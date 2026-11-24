@@ -11,7 +11,7 @@
 # are cleared first; DIR/src stays for the next run. Quit the app first.
 set -u
 S=$1; T=$2; D=$3
-BUNDLE=$(ls -d "$(cd "$(dirname "$0")/.." && pwd)"/build/Build/Products/Debug/*.app 2>/dev/null | head -1)
+BUNDLE=$(ls -d "$(cd "$(dirname "$0")/.." && pwd)"/build/DerivedData.noindex/Build/Products/Debug/*.app 2>/dev/null | head -1)
 APP="$BUNDLE/Contents/MacOS/$(basename "$BUNDLE" .app)"
 [ -x "$APP" ] || { echo "build the app first (make build)"; exit 2; }
 pgrep -x "$(basename "$BUNDLE" .app)" >/dev/null && { echo "quit the app first"; exit 2; }

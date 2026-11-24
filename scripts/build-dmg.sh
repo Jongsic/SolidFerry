@@ -16,14 +16,14 @@ MARKETING=()
 
 command -v xcodegen >/dev/null 2>&1 || { echo "error: xcodegen not found — brew install xcodegen" >&2; exit 1; }
 
-# Built in Xcode's default DerivedData, which Spotlight doesn't index, so the built app
-# doesn't show up next to an installed one. build/ ends up holding only the DMG.
+# Built under a folder Spotlight doesn't index (".noindex"), so the built app doesn't show up
+# next to an installed one; `make build` uses the same folder.
+DERIVED="build/DerivedData.noindex"
 xcodegen generate --quiet
 xcodebuild -project SolidFerry.xcodeproj -scheme SolidFerry -configuration Release -destination 'generic/platform=macOS' \
-    CODE_SIGN_IDENTITY=- ${MARKETING[@]+"${MARKETING[@]}"} -quiet build
+    -derivedDataPath "$DERIVED" CODE_SIGN_IDENTITY=- ${MARKETING[@]+"${MARKETING[@]}"} -quiet build
 
-PRODUCTS=$(xcodebuild -project SolidFerry.xcodeproj -scheme SolidFerry -configuration Release -destination 'generic/platform=macOS' \
-    -showBuildSettings 2>/dev/null | awk -F' = ' '/ BUILT_PRODUCTS_DIR/{print $2; exit}')
+PRODUCTS="$DERIVED/Build/Products/Release"
 STAGING="build/dmg-staging"
 DMG="build/SolidFerry-${VERSION}.dmg"
 

@@ -8,7 +8,7 @@ Device and protocol behavior it works around: [docs/QUIRKS.md](docs/QUIRKS.md). 
 ## Build & test
 
 ```sh
-make build    # xcodegen generate + Debug build (build/Build/Products/Debug/SolidFerry.app)
+make build    # xcodegen generate + Debug build (build/DerivedData.noindex/Build/Products/Debug/SolidFerry.app)
 make run      # build and open
 make test     # SolidFerryKit unit tests (Swift Testing)
 make cli      # the developer CLI, sferry

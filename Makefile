@@ -4,10 +4,10 @@ proj:
 	xcodegen generate --quiet
 
 build: proj
-	xcodebuild -project SolidFerry.xcodeproj -scheme SolidFerry -configuration Debug -derivedDataPath build -quiet build
+	xcodebuild -project SolidFerry.xcodeproj -scheme SolidFerry -configuration Debug -derivedDataPath build/DerivedData.noindex -quiet build
 
 run: build
-	open build/Build/Products/Debug/SolidFerry.app
+	open build/DerivedData.noindex/Build/Products/Debug/SolidFerry.app
 
 cli:
 	cd Packages/SolidFerryKit && swift build -c release --product sferry
